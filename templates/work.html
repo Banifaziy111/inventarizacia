@@ -14,7 +14,7 @@
             <p class="text-muted small mb-0">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
         </div>
         <div class="d-flex gap-2 align-items-center">
-            <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Ошибка">
+            <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Отсутствует">
                 <input class="form-check-input" type="checkbox" id="scanOnlyToggle">
                 <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
             </div>
@@ -54,7 +54,7 @@
             </div>
             <div class="col-lg-7">
                 <div class="card h-100 border place-card-mx position-relative overflow-hidden" id="placeCard">
-                    <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Ошибка</span><span class="swipe-hint-right">Совпадает →</span></div>
+                    <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Отсутствует</span><span class="swipe-hint-right">Совпадает →</span></div>
                     <div class="card-body place-card-body" id="placeCardBody">
                         <div class="d-flex justify-content-between align-items-start mb-3">
                             <div>
@@ -94,7 +94,7 @@
                     <i class="bi bi-check-circle-fill me-2"></i>Совпадает
                 </button>
                 <button type="button" class="btn btn-danger btn-lg scan-only-btn" id="scanOnlyErrorBtn" data-scan-status="error">
-                    <i class="bi bi-x-circle-fill me-2"></i>Ошибка
+                    <i class="bi bi-x-circle-fill me-2"></i>Отсутствует
                 </button>
             </div>
         </div>
@@ -149,26 +149,16 @@
                 <i class="bi bi-check-circle me-1"></i>Совпадает
             </button>
             <button type="button" class="btn btn-outline-danger" data-status="error">
-                <i class="bi bi-exclamation-octagon me-1"></i>Ошибка
+                <i class="bi bi-exclamation-octagon me-1"></i>Отсутствует
             </button>
             <button type="button" class="btn btn-outline-warning" data-status="shelf_error">
-                <i class="bi bi-grid-3x3-gap me-1"></i>Ошибка со стеллажем
+                <i class="bi bi-grid-3x3-gap me-1"></i>Сломано
             </button>
         </div>
         <div class="alert alert-warning d-none py-2" id="discrepancyReasonBlock">
-            <div id="factMxTypeRow">
-                <label class="form-label fw-semibold small">
-                    <i class="bi bi-exclamation-triangle me-1"></i>Что находится на МХ?
-                </label>
-                <select class="form-select form-select-sm mb-2" id="factMxTypeSelect">
-                    <option value="">Выберите полка или короб…</option>
-                    <option value="Полка">Полка</option>
-                    <option value="Короб">Короб</option>
-                </select>
-            </div>
-            <label class="form-label fw-semibold small mt-2" id="discrepancyReasonLabel">Причина расхождения</label>
+            <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина расхождения</label>
             <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
-                <option value="">Сначала выберите тип МХ выше</option>
+                <option value="">Выберите причину…</option>
             </select>
             <div id="otherReasonBlock" class="d-none">
                 <input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…">

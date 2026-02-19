@@ -619,8 +619,8 @@ function initWorkPage() {
 
     const STATUS_META = {
         ok: { label: "Совпадает", badge: "success" },
-        error: { label: "Ошибка", badge: "danger" },
-        shelf_error: { label: "Ошибка со стеллажем", badge: "warning" },
+        error: { label: "Отсутствует", badge: "danger" },
+        shelf_error: { label: "Сломано", badge: "warning" },
         default: { label: "Неизвестно", badge: "secondary" },
     };
 
@@ -636,46 +636,27 @@ function initWorkPage() {
         statusLabel.className = `badge text-bg-${meta?.badge || "secondary"}`;
     }
 
-    function updateDiscrepancyReasons(mxType) {
-        /**
-         * Обновляет список причин расхождения в зависимости от выбранного типа МХ (Полка/Короб)
-         * @param {string} mxType - "Короб", "Полка" или null (плейсхолдер)
-         */
+    /** Общий список причин для «Отсутствует» и «Сломано» */
+    const DISCREPANCY_REASONS_MERGED = [
+        { value: 'box_damaged', text: 'Короб поврежден' },
+        { value: 'box_wrong_size', text: 'Размер короба некорректный' },
+        { value: 'box_missing', text: 'Короб отсутствует' },
+        { value: 'shelf_damaged', text: 'Полка повреждена' },
+        { value: 'shelf_broken', text: 'Сломана полка' },
+        { value: 'boxes_missing', text: 'Отсутствуют короба' },
+        { value: 'no_dividers', text: 'Нет делителей' },
+        { value: 'other', text: 'Другое' }
+    ];
+
+    function updateDiscrepancyReasons() {
         if (!discrepancyReasonSelect) return;
-        
-        discrepancyReasonSelect.innerHTML = mxType
-            ? '<option value="">Выберите причину…</option>'
-            : '<option value="">Сначала выберите тип МХ выше</option>';
-        
-        let options = [];
-        if (mxType === 'Короб') {
-            options = [
-                { value: 'box_damaged', text: 'Короб поврежден' },
-                { value: 'box_wrong_size', text: 'Размер короба некорректный' },
-                { value: 'box_missing', text: 'Короб отсутствует' },
-                { value: 'other', text: 'Другое' }
-            ];
-        } else if (mxType === 'Полка') {
-            options = [
-                { value: 'shelf_damaged', text: 'Полка повреждена' },
-                { value: 'other', text: 'Другое' }
-            ];
-        } else if (mxType === 'Стеллаж') {
-            options = [
-                { value: 'shelf_broken', text: 'Сломана полка' },
-                { value: 'boxes_missing', text: 'Отсутствуют короба' },
-                { value: 'no_dividers', text: 'Нет делителей' },
-                { value: 'other', text: 'Другое' }
-            ];
-        }
-        
-        options.forEach(opt => {
+        discrepancyReasonSelect.innerHTML = '<option value="">Выберите причину…</option>';
+        DISCREPANCY_REASONS_MERGED.forEach(opt => {
             const option = document.createElement('option');
             option.value = opt.value;
             option.textContent = opt.text;
             discrepancyReasonSelect.appendChild(option);
         });
-        
         discrepancyReasonSelect.value = '';
         if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
         if (otherReasonInput) otherReasonInput.value = '';
@@ -690,25 +671,16 @@ function initWorkPage() {
             });
         updateStatusLabel();
         
-        // Показываем/скрываем блок с причиной расхождения
+        // Показываем/скрываем блок с причиной расхождения (один список для «Отсутствует» и «Сломано»)
         if (discrepancyReasonBlock) {
             if (value && value !== 'ok') {
                 discrepancyReasonBlock.classList.remove('d-none');
-                if (factMxTypeSelect) factMxTypeSelect.value = '';
                 if (discrepancyReasonSelect) discrepancyReasonSelect.value = '';
                 if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
                 if (otherReasonInput) otherReasonInput.value = '';
-                if (value === 'shelf_error') {
-                    if (factMxTypeRow) factMxTypeRow.classList.add('d-none');
-                    updateDiscrepancyReasons('Стеллаж');
-                } else {
-                    if (factMxTypeRow) factMxTypeRow.classList.remove('d-none');
-                    updateDiscrepancyReasons(null);
-                }
+                updateDiscrepancyReasons();
             } else {
                 discrepancyReasonBlock.classList.add('d-none');
-                if (factMxTypeRow) factMxTypeRow.classList.remove('d-none');
-                if (factMxTypeSelect) factMxTypeSelect.value = '';
                 if (discrepancyReasonSelect) discrepancyReasonSelect.value = '';
                 if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
                 if (otherReasonInput) otherReasonInput.value = '';
@@ -1065,7 +1037,7 @@ function initWorkPage() {
         }
         
         // Сбрасываем причины расхождения
-        updateDiscrepancyReasons(null);
+        updateDiscrepancyReasons();
         if (discrepancyReasonBlock) discrepancyReasonBlock.classList.add('d-none');
         if (factMxTypeRow) factMxTypeRow.classList.remove('d-none');
         if (factMxTypeSelect) factMxTypeSelect.value = '';
@@ -1246,17 +1218,9 @@ function initWorkPage() {
             return;
         }
 
-        // В режиме «Только скан» для Ошибка/Совпадает не требуем причину и тип МХ
+        // В режиме «Только скан» для Отсутствует/Совпадает не требуем причину
         const skipReasonValidation = state.scanOnlyMode && (state.currentStatus === 'ok' || state.currentStatus === 'error');
         if (!skipReasonValidation && state.currentStatus && state.currentStatus !== 'ok') {
-            if (state.currentStatus === 'error') {
-                const factType = factMxTypeSelect?.value?.trim();
-                if (!factType || (factType !== 'Полка' && factType !== 'Короб')) {
-                    showAlert(placeAlert, "Выберите, что находится на МХ: полка или короб");
-                    logEvent("Выберите полка/короб при ошибке", "warning");
-                    return;
-                }
-            }
             if (!discrepancyReasonSelect?.value) {
                 showAlert(placeAlert, "Выберите причину расхождения");
                 logEvent("Выберите причину расхождения", "warning");
@@ -1264,7 +1228,7 @@ function initWorkPage() {
             }
         }
 
-        // Формируем причину расхождения (в режиме «Только скан» при ошибке — без причины)
+        // Формируем причину расхождения (в режиме «Только скан» при Отсутствует — без причины)
         let discrepancyReason = '';
         if (skipReasonValidation && state.currentStatus === 'error') discrepancyReason = null;
         else if (discrepancyReasonSelect && discrepancyReasonSelect.value) {
@@ -1273,14 +1237,6 @@ function initWorkPage() {
             } else {
                 const selectedOption = discrepancyReasonSelect.options[discrepancyReasonSelect.selectedIndex];
                 discrepancyReason = selectedOption?.text || discrepancyReasonSelect.value;
-            }
-            if (state.currentStatus === 'shelf_error') {
-                discrepancyReason = `Стеллаж — ${discrepancyReason}`;
-            } else {
-                const factType = factMxTypeSelect?.value?.trim();
-                if (factType && (factType === 'Полка' || factType === 'Короб')) {
-                    discrepancyReason = `${factType} — ${discrepancyReason}`;
-                }
             }
         }
         
@@ -1594,11 +1550,7 @@ function initWorkPage() {
         setStatus(target.dataset.status);
     });
     
-    // При выборе полка/короб обновляем список причин
-    factMxTypeSelect?.addEventListener("change", (event) => {
-        const val = event.target.value;
-        updateDiscrepancyReasons(val === 'Полка' || val === 'Короб' ? val : null);
-    });
+    // Раньше здесь был выбор «полка/короб» — теперь один общий список причин
 
     // Обработчик выбора причины расхождения
     discrepancyReasonSelect?.addEventListener("change", (event) => {
@@ -1749,7 +1701,7 @@ function initWorkPage() {
                 } else {
                     setStatus("error");
                     if (state.scanOnlyMode) saveScan();
-                    else logEvent("Свайп: Ошибка", "info");
+                    else logEvent("Свайп: Отсутствует", "info");
                 }
             }
             pointerId = null;
