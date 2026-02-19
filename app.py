@@ -520,11 +520,18 @@ def auth():
 
 @app.route('/api/user/stats/<badge>', methods=['GET'])
 def get_user_stats(badge):
-    """Получить статистику пользователя за все время."""
+    """Получить статистику пользователя. Если передан since (timestamp в мс) — только данные смены с этого момента."""
     try:
+        since_ts = request.args.get('since', type=lambda x: int(x) if x and str(x).isdigit() else None)
+        since_sql = ""
+        since_arg = ()
+        if since_ts and since_ts > 0:
+            since_sql = " AND created_at >= to_timestamp(%s::double precision / 1000)"
+            since_arg = (since_ts,)
+
         conn = get_db()
         with conn.cursor() as cur:
-            # Общая статистика за все время
+            # Общая статистика за все время (без фильтра по смене)
             cur.execute("""
                 SELECT 
                     COUNT(*) as total_scanned,
@@ -534,7 +541,7 @@ def get_user_stats(badge):
                 WHERE badge = %s
             """, (badge,))
             overall = dict(cur.fetchone() or {})
-            
+
             # Статистика по сессиям
             cur.execute("""
                 SELECT 
@@ -563,8 +570,8 @@ def get_user_stats(badge):
                     'session_duration': row['session_duration'],
                     'is_active': row['is_active']
                 })
-            
-            # Статистика за сегодня
+
+            # Статистика за сегодня (или за смену, если передан since)
             cur.execute("""
                 SELECT 
                     COUNT(*) as today_scanned,
@@ -572,17 +579,20 @@ def get_user_stats(badge):
                 FROM inventory_results
                 WHERE badge = %s 
                 AND created_at >= CURRENT_DATE
-            """, (badge,))
+                """ + since_sql,
+                (badge,) + since_arg
+            )
             today = dict(cur.fetchone() or {})
 
-            # Последние 5 сканов для блока «Последние сканы»
+            # Последние 5 сканов (за смену, если передан since)
             cur.execute("""
                 SELECT place_cod, place_name, status, has_discrepancy, photo_filename, created_at
                 FROM inventory_results
                 WHERE badge = %s
+                """ + (since_sql if since_sql else "") + """
                 ORDER BY created_at DESC
                 LIMIT 5
-            """, (badge,))
+            """, (badge,) + since_arg if since_sql else (badge,))
             last_places = []
             for row in cur.fetchall():
                 last_places.append({
@@ -594,7 +604,7 @@ def get_user_stats(badge):
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['created_at'].isoformat() if row['created_at'] else None,
                 })
-            
+
         return jsonify({
             'success': True,
             'badge': badge,
@@ -795,11 +805,11 @@ def export_user_history():
             if s == "error":
                 return "Ошибка"
             if s == "shelf_error":
-                return "Ошибка со стеллажем"
+                return "Поломалось"
             if s == "recount":
                 return "Пересорт"
             if s == "missing":
-                return "Нет на МХ"
+                return "Отсутствует"
             return status
 
         def _error_description(reason, comment):

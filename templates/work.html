@@ -19,6 +19,9 @@
                 <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
             </div>
             <div class="full-mode-only d-flex gap-2">
+                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Начать новую смену — статистика и отчёты с нуля">
+                    <i class="bi bi-clock-history me-1"></i>Новая смена
+                </button>
                 <button class="btn btn-outline-secondary btn-sm" id="refreshStatsBtn">Статистика</button>
                 <button class="btn btn-outline-secondary btn-sm" id="refreshPlaceBtn">Обновить карточку</button>
             </div>
@@ -54,7 +57,7 @@
             </div>
             <div class="col-lg-7">
                 <div class="card h-100 border place-card-mx position-relative overflow-hidden" id="placeCard">
-                    <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Отсутствует</span><span class="swipe-hint-right">Совпадает →</span></div>
+                    <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Ошибка</span><span class="swipe-hint-right">Совпадает →</span></div>
                     <div class="card-body place-card-body" id="placeCardBody">
                         <div class="d-flex justify-content-between align-items-start mb-3">
                             <div>
@@ -94,7 +97,12 @@
                     <i class="bi bi-check-circle-fill me-2"></i>Совпадает
                 </button>
                 <button type="button" class="btn btn-danger btn-lg scan-only-btn" id="scanOnlyErrorBtn" data-scan-status="error">
-                    <i class="bi bi-x-circle-fill me-2"></i>Отсутствует
+                    <i class="bi bi-x-circle-fill me-2"></i>Ошибка
+                </button>
+            </div>
+            <div class="text-center mt-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="newShiftBtnScanOnly" title="Начать новую смену">
+                    <i class="bi bi-clock-history me-1"></i>Новая смена
                 </button>
             </div>
         </div>
@@ -149,17 +157,25 @@
                 <i class="bi bi-check-circle me-1"></i>Совпадает
             </button>
             <button type="button" class="btn btn-outline-danger" data-status="error">
-                <i class="bi bi-exclamation-octagon me-1"></i>Отсутствует
+                <i class="bi bi-exclamation-octagon me-1"></i>Ошибка
+            </button>
+            <button type="button" class="btn btn-outline-warning" data-status="missing">
+                <i class="bi bi-dash-circle me-1"></i>Отсутствует
             </button>
             <button type="button" class="btn btn-outline-warning" data-status="shelf_error">
-                <i class="bi bi-grid-3x3-gap me-1"></i>Сломано
+                <i class="bi bi-grid-3x3-gap me-1"></i>Поломалось
             </button>
         </div>
-        <div class="alert alert-warning d-none py-2" id="discrepancyReasonBlock">
-            <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина расхождения</label>
+        <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
+            <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
             <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
                 <option value="">Выберите причину…</option>
             </select>
+            <div id="reasonDetailRow" class="d-none mb-2">
+                <label class="form-label small text-muted" id="reasonDetailLabel"></label>
+                <select class="form-select form-select-sm d-none" id="reasonDetailSelect"></select>
+                <input type="text" class="form-control form-control-sm d-none" id="reasonDetailInput" placeholder="">
+            </div>
             <div id="otherReasonBlock" class="d-none">
                 <input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…">
             </div>

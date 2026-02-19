@@ -474,11 +474,18 @@ function initLoginPage() {
 
         sessionStorage.setItem("badge", data.badge);
         sessionStorage.setItem("isAdmin", data.is_admin ? "1" : "0");
+        // При входе на рабочую страницу — начать новую смену (статистика с нуля)
+        if (!data.is_admin && (data.redirect || "/work") === "/work") {
+            sessionStorage.setItem("inventory_new_shift", "1");
+        }
 
         const redirectTarget = data.redirect || (data.is_admin ? "/admin/dashboard" : "/work");
         window.location.href = redirectTarget;
     });
 }
+
+const SHIFT_START_KEY = "inventory_shift_start";
+const NEW_SHIFT_KEY = "inventory_new_shift";
 
 function initWorkPage() {
     const pageBadge = document.body.dataset.badge;
@@ -487,6 +494,13 @@ function initWorkPage() {
         window.location.href = "/";
         return;
     }
+    // При первом заходе после логина — начать смену с текущего момента (статистика с нуля)
+    try {
+        if (sessionStorage.getItem(NEW_SHIFT_KEY) === "1") {
+            sessionStorage.setItem(SHIFT_START_KEY, String(Date.now()));
+            sessionStorage.removeItem(NEW_SHIFT_KEY);
+        }
+    } catch (e) {}
 
     const badgeLabel = document.getElementById("currentBadge");
     const lastSyncLabel = document.getElementById("lastSyncLabel");
@@ -495,6 +509,8 @@ function initWorkPage() {
     const totalDiscrepancy = document.getElementById("totalDiscrepancy");
     const totalOk = document.getElementById("totalOk");
     const sessionsTableBody = document.getElementById("sessionsTableBody");
+    const newShiftBtn = document.getElementById("newShiftBtn");
+    const newShiftBtnScanOnly = document.getElementById("newShiftBtnScanOnly");
     const refreshStatsBtn = document.getElementById("refreshStatsBtn");
     const placeForm = document.getElementById("scanForm");
     const placeInput = document.getElementById("placeInput");
@@ -509,9 +525,11 @@ function initWorkPage() {
     const statusLabel = document.getElementById("statusLabel");
     const commentInput = document.getElementById("commentInput");
     const discrepancyReasonBlock = document.getElementById("discrepancyReasonBlock");
-    const factMxTypeRow = document.getElementById("factMxTypeRow");
-    const factMxTypeSelect = document.getElementById("factMxTypeSelect");
     const discrepancyReasonSelect = document.getElementById("discrepancyReasonSelect");
+    const reasonDetailRow = document.getElementById("reasonDetailRow");
+    const reasonDetailLabel = document.getElementById("reasonDetailLabel");
+    const reasonDetailSelect = document.getElementById("reasonDetailSelect");
+    const reasonDetailInput = document.getElementById("reasonDetailInput");
     const otherReasonBlock = document.getElementById("otherReasonBlock");
     const otherReasonInput = document.getElementById("otherReasonInput");
     const photoDropzone = document.getElementById("photoDropzone");
@@ -619,8 +637,9 @@ function initWorkPage() {
 
     const STATUS_META = {
         ok: { label: "Совпадает", badge: "success" },
-        error: { label: "Отсутствует", badge: "danger" },
-        shelf_error: { label: "Сломано", badge: "warning" },
+        error: { label: "Ошибка", badge: "danger" },
+        missing: { label: "Отсутствует", badge: "warning" },
+        shelf_error: { label: "Поломалось", badge: "warning" },
         default: { label: "Неизвестно", badge: "secondary" },
     };
 
@@ -636,30 +655,86 @@ function initWorkPage() {
         statusLabel.className = `badge text-bg-${meta?.badge || "secondary"}`;
     }
 
-    /** Общий список причин для «Отсутствует» и «Сломано» */
-    const DISCREPANCY_REASONS_MERGED = [
-        { value: 'box_damaged', text: 'Короб поврежден' },
-        { value: 'box_wrong_size', text: 'Размер короба некорректный' },
-        { value: 'box_missing', text: 'Короб отсутствует' },
-        { value: 'shelf_damaged', text: 'Полка повреждена' },
-        { value: 'shelf_broken', text: 'Сломана полка' },
-        { value: 'boxes_missing', text: 'Отсутствуют короба' },
-        { value: 'no_dividers', text: 'Нет делителей' },
-        { value: 'other', text: 'Другое' }
-    ];
+    /** Причины по статусам: Ошибка, Отсутствует, Поломалось (sub — подпункты выпадающего списка, detailPlaceholder — подсказка для текстового поля) */
+    const REASONS_BY_STATUS = {
+        error: [
+            { value: 'no_rack', text: 'Нет стеллажа', sub: [{ value: 'passage', text: 'проход' }, { value: 'obstacle', text: 'препятствие' }] },
+            { value: 'wrong_numbering', text: 'Нарушена нумерация', detailPlaceholder: 'правильный номер' },
+            { value: 'other', text: 'Другое' }
+        ],
+        missing: [
+            { value: 'no_shelf', text: 'Нет полки', sub: [{ value: 'n_shelves', text: 'N полок' }, { value: 'shelf_size', text: 'размер полки' }] },
+            { value: 'no_divider', text: 'Нет делителя', sub: [{ value: 'n_dividers', text: 'N делителей' }, { value: 'divider_size', text: 'размер делителя' }] },
+            { value: 'no_box', text: 'Нет короба', sub: [{ value: 'n_boxes', text: 'N коробов' }, { value: 'box_size', text: 'размер короба' }] },
+            { value: 'no_container', text: 'Нет тары', detailPlaceholder: 'ID короба' },
+            { value: 'other', text: 'Другое' }
+        ],
+        shelf_error: [
+            { value: 'shelf_broken', text: 'Сломана полка', detailPlaceholder: 'размер полки' },
+            { value: 'divider_broken', text: 'Сломан делитель' },
+            { value: 'box_broken', text: 'Сломан короб' },
+            { value: 'box_wrong_size', text: 'Неверный размер короба' },
+            { value: 'other', text: 'Другое' }
+        ]
+    };
 
-    function updateDiscrepancyReasons() {
+    function hideReasonDetail() {
+        if (reasonDetailRow) reasonDetailRow.classList.add('d-none');
+        if (reasonDetailSelect) {
+            reasonDetailSelect.classList.add('d-none');
+            reasonDetailSelect.innerHTML = '';
+            reasonDetailSelect.value = '';
+        }
+        if (reasonDetailInput) {
+            reasonDetailInput.classList.add('d-none');
+            reasonDetailInput.value = '';
+            reasonDetailInput.placeholder = '';
+        }
+        if (reasonDetailLabel) reasonDetailLabel.textContent = '';
+    }
+
+    function updateDiscrepancyReasons(status) {
         if (!discrepancyReasonSelect) return;
+        const list = (status && REASONS_BY_STATUS[status]) ? REASONS_BY_STATUS[status] : [];
         discrepancyReasonSelect.innerHTML = '<option value="">Выберите причину…</option>';
-        DISCREPANCY_REASONS_MERGED.forEach(opt => {
+        list.forEach(opt => {
             const option = document.createElement('option');
             option.value = opt.value;
             option.textContent = opt.text;
             discrepancyReasonSelect.appendChild(option);
         });
         discrepancyReasonSelect.value = '';
+        hideReasonDetail();
         if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
         if (otherReasonInput) otherReasonInput.value = '';
+    }
+
+    function showReasonDetail(reasonOption) {
+        if (!reasonDetailRow || !reasonOption) return;
+        reasonDetailRow.classList.remove('d-none');
+        if (reasonOption.sub && reasonOption.sub.length) {
+            if (reasonDetailLabel) reasonDetailLabel.textContent = 'Уточнение';
+            if (reasonDetailSelect) {
+                reasonDetailSelect.classList.remove('d-none');
+                reasonDetailSelect.innerHTML = '<option value="">—</option>';
+                reasonOption.sub.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.value;
+                    opt.textContent = s.text;
+                    reasonDetailSelect.appendChild(opt);
+                });
+                reasonDetailSelect.value = '';
+            }
+            if (reasonDetailInput) reasonDetailInput.classList.add('d-none');
+        } else if (reasonOption.detailPlaceholder) {
+            if (reasonDetailLabel) reasonDetailLabel.textContent = 'Уточнение';
+            if (reasonDetailInput) {
+                reasonDetailInput.classList.remove('d-none');
+                reasonDetailInput.placeholder = reasonOption.detailPlaceholder;
+                reasonDetailInput.value = '';
+            }
+            if (reasonDetailSelect) reasonDetailSelect.classList.add('d-none');
+        }
     }
 
     function setStatus(value) {
@@ -670,18 +745,18 @@ function initWorkPage() {
                 btn.classList.toggle("active", btn.dataset.status === value);
             });
         updateStatusLabel();
-        
-        // Показываем/скрываем блок с причиной расхождения (один список для «Отсутствует» и «Сломано»)
         if (discrepancyReasonBlock) {
             if (value && value !== 'ok') {
                 discrepancyReasonBlock.classList.remove('d-none');
                 if (discrepancyReasonSelect) discrepancyReasonSelect.value = '';
+                hideReasonDetail();
                 if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
                 if (otherReasonInput) otherReasonInput.value = '';
-                updateDiscrepancyReasons();
+                updateDiscrepancyReasons(value);
             } else {
                 discrepancyReasonBlock.classList.add('d-none');
                 if (discrepancyReasonSelect) discrepancyReasonSelect.value = '';
+                hideReasonDetail();
                 if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
                 if (otherReasonInput) otherReasonInput.value = '';
             }
@@ -822,7 +897,9 @@ function initWorkPage() {
     }
 
     async function loadStats() {
-        const { ok, data } = await API.get(`/api/user/stats/${badge}`);
+        const shiftStart = (typeof sessionStorage !== "undefined" && sessionStorage.getItem(SHIFT_START_KEY)) || "";
+        const url = shiftStart ? `/api/user/stats/${encodeURIComponent(badge)}?since=${shiftStart}` : `/api/user/stats/${encodeURIComponent(badge)}`;
+        const { ok, data } = await API.get(url);
         if (!ok || data.error) {
             showAlert(placeAlert, data.error || "Не удалось загрузить статистику");
             return;
@@ -1037,10 +1114,9 @@ function initWorkPage() {
         }
         
         // Сбрасываем причины расхождения
-        updateDiscrepancyReasons();
+        updateDiscrepancyReasons(state.currentStatus);
+        hideReasonDetail();
         if (discrepancyReasonBlock) discrepancyReasonBlock.classList.add('d-none');
-        if (factMxTypeRow) factMxTypeRow.classList.remove('d-none');
-        if (factMxTypeSelect) factMxTypeSelect.value = '';
         if (discrepancyReasonSelect) discrepancyReasonSelect.value = '';
         if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
         if (otherReasonInput) otherReasonInput.value = '';
@@ -1051,7 +1127,6 @@ function initWorkPage() {
         if (placeCard) placeCard.classList.remove("is-loaded");
         state.lastMxCode = null;
         if (commentInput) commentInput.value = "";
-        if (factMxTypeSelect) factMxTypeSelect.value = "";
         if (discrepancyReasonSelect) discrepancyReasonSelect.value = "";
         if (otherReasonInput) otherReasonInput.value = "";
         if (discrepancyReasonBlock) discrepancyReasonBlock.classList.add("d-none");
@@ -1218,7 +1293,7 @@ function initWorkPage() {
             return;
         }
 
-        // В режиме «Только скан» для Отсутствует/Совпадает не требуем причину
+        // В режиме «Только скан» для Совпадает/Ошибка не требуем причину
         const skipReasonValidation = state.scanOnlyMode && (state.currentStatus === 'ok' || state.currentStatus === 'error');
         if (!skipReasonValidation && state.currentStatus && state.currentStatus !== 'ok') {
             if (!discrepancyReasonSelect?.value) {
@@ -1228,15 +1303,22 @@ function initWorkPage() {
             }
         }
 
-        // Формируем причину расхождения (в режиме «Только скан» при Отсутствует — без причины)
+        // Формируем причину: основной текст + подпункт (выпадающий или поле ввода) или «Другое»
         let discrepancyReason = '';
         if (skipReasonValidation && state.currentStatus === 'error') discrepancyReason = null;
-        else if (discrepancyReasonSelect && discrepancyReasonSelect.value) {
+        else if (discrepancyReasonSelect?.value) {
             if (discrepancyReasonSelect.value === 'other') {
                 discrepancyReason = otherReasonInput?.value?.trim() || 'Другое';
             } else {
-                const selectedOption = discrepancyReasonSelect.options[discrepancyReasonSelect.selectedIndex];
-                discrepancyReason = selectedOption?.text || discrepancyReasonSelect.value;
+                const mainOpt = discrepancyReasonSelect.options[discrepancyReasonSelect.selectedIndex];
+                discrepancyReason = mainOpt?.text || discrepancyReasonSelect.value;
+                const reasonOpt = getCurrentReasonOption();
+                if (reasonOpt?.sub?.length && reasonDetailSelect?.value) {
+                    const subOpt = reasonDetailSelect.options[reasonDetailSelect.selectedIndex];
+                    if (subOpt?.text) discrepancyReason += ' — ' + subOpt.text;
+                } else if (reasonOpt?.detailPlaceholder && reasonDetailInput?.value?.trim()) {
+                    discrepancyReason += ' — ' + reasonDetailInput.value.trim();
+                }
             }
         }
         
@@ -1474,6 +1556,20 @@ function initWorkPage() {
         loadPlace(placeCod);
     }
 
+    function startNewShift() {
+        try {
+            sessionStorage.setItem(SHIFT_START_KEY, String(Date.now()));
+        } catch (e) {}
+        state.lastPlaces = [];
+        state.scannedPlaceCodes.clear();
+        clearPlaceCard();
+        loadStats();
+        showAlert(placeAlert, "Новая смена начата. Статистика и отчёты считаются с этого момента.", "info");
+        logEvent("Начата новая смена", "info");
+    }
+    newShiftBtn?.addEventListener("click", startNewShift);
+    newShiftBtnScanOnly?.addEventListener("click", startNewShift);
+
     refreshStatsBtn?.addEventListener("click", () => {
         loadStats();
         logEvent("Статистика обновлена", "info");
@@ -1550,19 +1646,26 @@ function initWorkPage() {
         setStatus(target.dataset.status);
     });
     
-    // Раньше здесь был выбор «полка/короб» — теперь один общий список причин
+    // При выборе причины показываем подпункт (выпадающий список или поле ввода) или «Другое»
+    function getCurrentReasonOption() {
+        const status = state.currentStatus;
+        const list = status && REASONS_BY_STATUS[status] ? REASONS_BY_STATUS[status] : [];
+        const val = discrepancyReasonSelect?.value;
+        return list.find(r => r.value === val) || null;
+    }
 
-    // Обработчик выбора причины расхождения
     discrepancyReasonSelect?.addEventListener("change", (event) => {
         const value = event.target.value;
-        if (otherReasonBlock) {
-            if (value === 'other') {
-                otherReasonBlock.classList.remove('d-none');
-                otherReasonInput?.focus();
-            } else {
-                otherReasonBlock.classList.add('d-none');
-                if (otherReasonInput) otherReasonInput.value = '';
-            }
+        hideReasonDetail();
+        if (value === 'other') {
+            if (otherReasonBlock) otherReasonBlock.classList.remove('d-none');
+            otherReasonInput?.focus();
+        } else {
+            if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
+            if (otherReasonInput) otherReasonInput.value = '';
+            const reasonOpt = getCurrentReasonOption();
+            if (reasonOpt && (reasonOpt.sub?.length || reasonOpt.detailPlaceholder))
+                showReasonDetail(reasonOpt);
         }
     });
 
@@ -1701,7 +1804,7 @@ function initWorkPage() {
                 } else {
                     setStatus("error");
                     if (state.scanOnlyMode) saveScan();
-                    else logEvent("Свайп: Отсутствует", "info");
+                    else logEvent("Свайп: Ошибка", "info");
                 }
             }
             pointerId = null;
