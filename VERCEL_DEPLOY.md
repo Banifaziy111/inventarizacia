@@ -1,0 +1,39 @@
+# Деплой на Vercel
+
+## 1. Переменные окружения
+
+В настройках проекта Vercel (Settings → Environment Variables) добавьте:
+
+- `DB_HOST` — хост PostgreSQL (например `31.207.77.167`)
+- `DB_PORT` — порт (обычно `5432`)
+- `DB_NAME` — имя БД
+- `DB_USER` — пользователь
+- `DB_PASSWORD` — пароль
+
+Без них приложение не сможет подключиться к БД.
+
+## 2. Доступ к БД из интернета
+
+Сервер PostgreSQL должен быть доступен снаружи (с Vercel). Если БД в корп. сети или за файрволом, откройте доступ с IP Vercel или используйте облачную БД (Neon, Supabase, Railway и т.п.).
+
+## 3. Деплой через CLI
+
+```bash
+npm i -g vercel
+vercel login
+vercel
+```
+
+Либо подключите репозиторий в [vercel.com/new](https://vercel.com/new) — деплой по push.
+
+## 4. Локальная проверка
+
+```bash
+pip install -r requirements-vercel.txt
+vercel dev
+```
+
+## Примечания
+
+- Используется `requirements-vercel.txt` (без Playwright), чтобы уложиться в лимит размера функции.
+- На Vercel соединение с БД создаётся на каждый запрос и закрывается после ответа (переменная `VERCEL=1`).

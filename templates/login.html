@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Вход в систему{% endblock %}
+
+{% block content %}
+<div class="row g-4 align-items-center min-vh-75">
+    <div class="col-lg-6">
+        <div class="card hero-card p-4 p-lg-5">
+            <span class="badge bg-white bg-opacity-25 mb-3">Сканирование склада</span>
+            <h1 class="h3 fw-bold mb-3 text-white">Актуализация мест хранения</h1>
+            <p class="opacity-75 text-white mb-0">
+                Приложение для проверки МХ и фиксации результатов инвентаризации.
+            </p>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card glass-panel p-4 p-lg-5" id="loginCard">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="h5 fw-bold mb-1">Вход по бэйджу</h2>
+                    <p class="text-muted small mb-0">Введите номер пропуска сотрудника</p>
+                </div>
+                <span class="badge bg-secondary rounded-pill" id="connectionStatusBadge">Проверяем соединение…</span>
+            </div>
+            <div id="loginAlert" class="alert alert-danger d-none" role="alert"></div>
+            <form id="loginForm" class="needs-validation" novalidate>
+                <div class="mb-3">
+                    <label class="form-label" for="badgeInput">Бэйдж</label>
+                    <input type="text" id="badgeInput" class="form-control form-control-lg" placeholder="Например, 12345"
+                           minlength="3" required autocomplete="off">
+                    <div class="invalid-feedback">Укажите номер бэйджа</div>
+                </div>
+                <div class="mb-3 d-none" id="passwordGroup">
+                    <label class="form-label" for="passwordInput">Пароль администратора</label>
+                    <input type="password" id="passwordInput" class="form-control form-control-lg" placeholder="••••••••">
+                </div>
+                <div class="d-flex align-items-center justify-content-between mb-4">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="remember">
+                        <label class="form-check-label" for="remember">Запомнить устройство</label>
+                    </div>
+                    <a href="#" id="adminToggleLink" class="text-primary small text-decoration-none">Вход для администратора</a>
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">
+                    Начать смену
+                </button>
+            </form>
+            <p class="small text-muted mt-3 mb-0" id="deviceStatusInfo">Проверяем устройство…</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

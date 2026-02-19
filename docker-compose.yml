@@ -1,0 +1,15 @@
+# Запуск приложения инвентаризации через Docker Compose
+# БД подключается внешняя (укажите переменные ниже или в .env)
+
+services:
+  web:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_HOST=${DB_HOST:-31.207.77.167}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-botdb}
+      - DB_USER=${DB_USER:-aperepechkin}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+    restart: unless-stopped

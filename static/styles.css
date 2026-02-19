@@ -1,0 +1,713 @@
+/* ========================================
+   ИНВЕНТАРИЗАЦИЯ — НОВЫЙ ДИЗАЙН
+   Складская тема, читаемость, мобильность
+   ======================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+
+:root {
+    --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
+    --primary: #0d9488;
+    --primary-hover: #0f766e;
+    --primary-light: rgba(13, 148, 136, 0.12);
+    --accent: #f59e0b;
+    --accent-light: rgba(245, 158, 11, 0.12);
+    --success: #059669;
+    --danger: #dc2626;
+    --danger-light: rgba(220, 38, 38, 0.1);
+    --warning: #d97706;
+    --info: #0891b2;
+    --bg-page: #f1f5f9;
+    --bg-surface: #ffffff;
+    --bg-elevated: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --radius-sm: 0.5rem;
+    --radius: 0.75rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.25rem;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] {
+    --primary: #14b8a6;
+    --primary-hover: #2dd4bf;
+    --primary-light: rgba(20, 184, 166, 0.15);
+    --accent: #fbbf24;
+    --accent-light: rgba(251, 191, 36, 0.15);
+    --success: #10b981;
+    --danger: #ef4444;
+    --danger-light: rgba(239, 68, 68, 0.15);
+    --bg-page: #0f172a;
+    --bg-surface: #1e293b;
+    --bg-elevated: #334155;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --border: #334155;
+    --border-strong: #475569;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.5);
+}
+
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    line-height: 1.5;
+    transition: background 0.3s, color 0.3s;
+    min-height: 100vh;
+}
+
+/* ========== LAYOUT ========== */
+.app-header {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+.app-header .navbar-brand {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--primary) !important;
+}
+
+.app-header .navbar-brand:hover {
+    color: var(--primary-hover) !important;
+}
+
+main {
+    min-height: calc(100vh - 140px);
+}
+
+.app-footer {
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.875rem;
+}
+
+/* ========== CARDS ========== */
+.card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.card-header {
+    background: transparent;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    padding: 1rem 1.25rem;
+}
+
+/* ========== BUTTONS ========== */
+.btn-primary {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+.btn-outline-primary {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-outline-primary:hover {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary-hover);
+}
+
+.btn-success { background: var(--success); border-color: var(--success); }
+.btn-danger { background: var(--danger); border-color: var(--danger); }
+.btn-warning { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ========== FORMS ========== */
+.form-control, .form-select {
+    border-radius: var(--radius-sm);
+    border-color: var(--border);
+    font-family: var(--font-sans);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.form-control-lg {
+    font-size: 1.1rem;
+}
+
+/* ========== BADGES ========== */
+.badge {
+    font-weight: 500;
+}
+
+.bg-primary { background: var(--primary) !important; }
+.bg-success { background: var(--success) !important; }
+.bg-danger { background: var(--danger) !important; }
+.bg-warning { background: var(--accent) !important; }
+.bg-info { background: var(--info) !important; }
+
+/* ========== NAV / OFFCANVAS ========== */
+.offcanvas {
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+}
+
+.offcanvas .nav-link {
+    border-radius: var(--radius);
+    padding: 0.65rem 1rem;
+}
+
+.offcanvas .nav-link:hover {
+    background: var(--primary-light);
+}
+
+.offcanvas .nav-link.active {
+    background: var(--primary);
+    color: #fff !important;
+}
+
+/* ========== THEME TOGGLE ========== */
+.theme-toggle {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 6px;
+    background: var(--bg-page);
+}
+
+.theme-toggle-track {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 44px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--border);
+    padding: 0 6px;
+}
+
+.theme-icon-sun, .theme-icon-moon {
+    font-size: 0.9rem;
+    opacity: 0.6;
+}
+
+body[data-theme="light"] .theme-icon-sun { opacity: 1; }
+body[data-theme="dark"] .theme-icon-moon { opacity: 1; }
+
+.theme-toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 4px;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: var(--shadow);
+    transition: transform 0.25s;
+}
+
+body[data-theme="dark"] .theme-toggle-thumb {
+    transform: translateX(22px);
+}
+
+/* ========== ROUTE MAP (Ближайшие МХ) ========== */
+.route-map {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 0.5rem;
+}
+
+.route-node {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem;
+    text-align: center;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.route-node:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+}
+
+.route-node:active {
+    transform: translateY(0);
+}
+
+.route-node.highlight {
+    border-color: var(--danger);
+    background: var(--danger-light);
+}
+
+.route-node.highlight:hover {
+    border-color: var(--danger);
+    background: rgba(220, 38, 38, 0.18);
+}
+
+.route-node.scanned {
+    border-color: var(--success);
+    background: rgba(5, 150, 105, 0.08);
+    opacity: 0.85;
+}
+
+.route-node.scanned:hover {
+    opacity: 1;
+}
+
+/* ========== PLACE CARDS (последние сканы, история) ========== */
+.place-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.place-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.place-card:active {
+    transform: translateY(0);
+}
+
+.place-card.ok {
+    border-left: 3px solid var(--success);
+}
+
+.place-card.error {
+    border-left: 3px solid var(--danger);
+}
+
+.place-card.shelf_error {
+    border-left: 3px solid var(--accent);
+}
+
+/* ========== UPLOAD DROPZONE ========== */
+.upload-dropzone {
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--bg-page);
+    transition: all 0.2s;
+}
+
+.upload-dropzone:hover, .upload-dropzone.dragover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+
+/* ========== STAT PILL ========== */
+.stat-pill {
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.25rem 0.75rem;
+}
+
+/* ========== PHOTO GRID ========== */
+.photo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.75rem;
+}
+
+.photo-card {
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    background: var(--bg-surface);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.photo-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* ========== NOTIFICATION PANEL ========== */
+.notification-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+/* ========== TICKETS ========== */
+.ticket-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.875rem;
+}
+
+.ticket-card .ticket-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* ========== ADMIN ACTIVITY ========== */
+.admin-activity-item {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+}
+
+.admin-activity-item:last-child {
+    border-bottom: none;
+}
+
+/* ========== TABLES ========== */
+.table {
+    --bs-table-bg: transparent;
+}
+
+.table-light {
+    --bs-table-bg: var(--bg-page);
+}
+
+/* ========== ANIMATIONS ========== */
+@keyframes badgePulseOnce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.badge-pulse-once {
+    animation: badgePulseOnce 1s ease-out 1;
+}
+
+@keyframes loginCardEnter {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.login-card-enter {
+    animation: loginCardEnter 0.4s ease-out both;
+}
+
+.animate-on-scroll {
+    opacity: 0;
+    transform: translateY(16px);
+}
+
+.animate-visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.4s, transform 0.4s;
+}
+
+/* ========== LOGIN / GLASS ========== */
+#loginCard {
+    min-height: 340px;
+}
+
+.glass-panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+}
+
+.hero-card {
+    background: linear-gradient(135deg, var(--primary) 0%, #0f766e 100%);
+    color: #fff;
+    border: none;
+}
+
+/* ========== PROGRESS ========== */
+.progress-card .progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border);
+}
+
+.progress-card .progress-bar {
+    border-radius: 999px;
+}
+
+/* ========== INPUT HIGHLIGHT ========== */
+.input-highlight.is-valid {
+    border-color: var(--success);
+}
+
+.input-highlight.is-invalid {
+    border-color: var(--danger);
+}
+
+/* ========== ADMIN STATUS BAR ========== */
+.admin-status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border);
+}
+
+/* ========== INFO BLOCKS (МХ карточка) ========== */
+.info-block {
+    background: var(--primary-light);
+}
+
+/* Карточка МХ — акцент при загрузке + анимация появления */
+.place-card-mx {
+    border-left: 4px solid var(--primary);
+    transition: box-shadow 0.3s, border-color 0.3s;
+}
+
+.place-card-mx.is-loaded {
+    box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(13, 148, 136, 0.15);
+    animation: placeCardLoaded 0.5s ease-out;
+}
+
+@keyframes placeCardLoaded {
+    0% { box-shadow: 0 0 0 1px var(--primary-light); }
+    50% { box-shadow: 0 0 0 3px var(--primary-light), 0 4px 24px rgba(13, 148, 136, 0.25); }
+    100% { box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(13, 148, 136, 0.15); }
+}
+
+/* ========== PROGRESS CARDS ========== */
+.progress-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.progress-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.progress-card .progress {
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-card .progress-bar {
+    transition: width 0.6s ease-out;
+    background: linear-gradient(90deg, var(--primary) 0%, var(--primary-hover) 100%);
+}
+
+.progress-card .progress-bar.bg-success {
+    background: linear-gradient(90deg, var(--success) 0%, #047857 100%);
+}
+
+.progress-card .progress-bar.bg-info {
+    background: linear-gradient(90deg, var(--info) 0%, #0e7490 100%);
+}
+
+/* ========== STATUS BUTTONS ========== */
+[data-status].btn {
+    transition: transform 0.15s, box-shadow 0.2s, background 0.2s, border-color 0.2s;
+}
+
+[data-status].btn.active {
+    box-shadow: 0 0 0 2px currentColor, var(--shadow-md);
+    transform: scale(1.02);
+}
+
+.btn-outline-success.active {
+    background: var(--success);
+    color: #fff !important;
+    border-color: var(--success);
+}
+
+.btn-outline-danger.active {
+    background: var(--danger);
+    color: #fff !important;
+    border-color: var(--danger);
+}
+
+.btn-outline-warning.active {
+    background: var(--accent);
+    color: #fff !important;
+    border-color: var(--accent);
+}
+
+/* ========== FAB BUTTON ========== */
+#fabScanBtn {
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(13, 148, 136, 0.35);
+}
+
+#fabScanBtn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 8px 28px rgba(13, 148, 136, 0.5) !important;
+}
+
+#fabScanBtn:active {
+    transform: scale(0.98);
+}
+
+/* ========== TABLES ========== */
+.table tbody tr {
+    transition: background 0.15s;
+}
+
+.table tbody tr:hover {
+    background: var(--primary-light);
+}
+
+.table-hover tbody tr:hover {
+    background: var(--primary-light);
+}
+
+/* ========== EMPTY STATES ========== */
+.empty-state {
+    padding: 2rem 1.5rem;
+    text-align: center;
+    color: var(--text-muted);
+    border-radius: var(--radius);
+    border: 1px dashed var(--border);
+}
+
+/* ========== SECTION HEADERS ========== */
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-left: 0.75rem;
+    border-left: 3px solid var(--primary);
+}
+
+.section-title i {
+    opacity: 0.9;
+    color: var(--primary);
+}
+
+/* ========== LAST PLACES GRID ========== */
+.last-places-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+@media (min-width: 576px) {
+    .last-places-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
+}
+
+/* ========== SCAN HERO (блок ввода кода МХ) ========== */
+.scan-hero {
+    border-left: 4px solid var(--primary);
+    background: linear-gradient(135deg, var(--bg-surface) 0%, rgba(13, 148, 136, 0.04) 100%);
+}
+
+.scan-hero .input-group-text {
+    background: var(--primary-light);
+    border-color: var(--border);
+    color: var(--primary);
+}
+
+/* ========== TOASTS ========== */
+.toast-container {
+    max-width: min(360px, calc(100vw - 1.5rem));
+}
+
+.toast {
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border);
+}
+
+/* ========== EMPTY PLACEHOLDER (значение «—» в карточке МХ) ========== */
+.info-block .place-value-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ========== РЕЖИМ «ТОЛЬКО СКАН» ========== */
+.scan-only-only {
+    display: none !important;
+}
+
+body.scan-only-mode .full-mode-only {
+    display: none !important;
+}
+
+body.scan-only-mode .scan-only-only {
+    display: block !important;
+}
+
+.scan-only-btn {
+    min-width: 160px;
+    min-height: 52px;
+}
+
+/* ========== СВАЙП ПО КАРТОЧКЕ МХ ========== */
+.place-card-mx {
+    touch-action: pan-y;
+    user-select: none;
+}
+
+.place-card-swipe-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: none;
+    padding: 0 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.swipe-hint-left { color: var(--danger); }
+.swipe-hint-right { color: var(--success); }
+
+.place-card-mx .place-card-body {
+    transition: transform 0.12s ease-out, background 0.15s;
+}
+
+.place-card-mx.swipe-left {
+    border-left-color: var(--danger);
+}
+
+.place-card-mx.swipe-left .place-card-body {
+    transform: translateX(-6px);
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.place-card-mx.swipe-right .place-card-body {
+    transform: translateX(6px);
+    background: rgba(5, 150, 105, 0.08);
+}
+
+.place-card-mx.swipe-right {
+    box-shadow: 0 0 0 1px rgba(5, 150, 105, 0.3);
+}
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 576px) {
+    .card-body { padding: 1rem; }
+    .btn { padding: 0.5rem 1rem; }
+    [data-status].btn { min-height: 44px; }
+}

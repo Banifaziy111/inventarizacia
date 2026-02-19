@@ -1,0 +1,17 @@
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.pyo
+.git
+.gitignore
+*.md
+.env
+.env.*
+*.log
+temp_extracted
+.cursor
+node_modules
+*.sql
+.DS_Store

@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block title %}Админ-панель{% endblock %}
+
+{% block content %}
+<header class="d-flex flex-column gap-3 mb-4">
+    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
+        <div>
+            <h1 class="h4 mb-1 fw-bold">Центр управления складом</h1>
+            <p class="text-muted small mb-0">Аналитика, задания и контроль качества</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="input-group input-group-sm" style="max-width:220px">
+                <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
+                <input type="date" class="form-control" id="filterFrom" title="Дата от">
+                <input type="date" class="form-control" id="filterTo" title="Дата до">
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="refreshAdminBtn">
+                <i class="bi bi-arrow-clockwise me-1"></i>Обновить
+            </button>
+            <button class="btn btn-primary btn-sm" id="exportBtn" data-bs-toggle="modal" data-bs-target="#reportsModal">
+                <i class="bi bi-file-earmark-arrow-down me-1"></i>Отчёты
+            </button>
+        </div>
+    </div>
+    <nav class="d-flex flex-wrap gap-2">
+        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#assignTaskModal">
+            <i class="bi bi-person-plus me-1"></i>Назначить зону
+        </button>
+        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#qualityReviewModal">
+            <i class="bi bi-clipboard-check me-1"></i>Новая ревизия
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="scrollToProblemZones">
+            <i class="bi bi-exclamation-triangle me-1"></i>Проблемные МХ
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="scrollToTickets">
+            <i class="bi bi-chat-square-text me-1"></i>Тикеты
+        </button>
+    </nav>
+</header>
+
+<section class="row g-3 mb-4" aria-label="Ключевые показатели">
+    <div class="col-6 col-md-3">
+        <article class="card h-100 overflow-hidden">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="rounded-3 bg-primary bg-opacity-10 p-2">
+                    <i class="bi bi-qr-code-scan fs-4 text-primary"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="small text-muted mb-0">Сканов сегодня</p>
+                    <p class="h5 mb-0 fw-bold" id="overallScannedValue">—</p>
+                    <span class="badge bg-success bg-opacity-10 text-success small" id="weeklyDelta">нет данных</span>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-6 col-md-3">
+        <article class="card h-100 overflow-hidden">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="rounded-3 bg-danger bg-opacity-10 p-2">
+                    <i class="bi bi-exclamation-triangle-fill fs-4 text-danger"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="small text-muted mb-0">Расхождения</p>
+                    <p class="h5 mb-0 fw-bold text-danger" id="overallDiscrepancyValue">—</p>
+                    <p class="small text-muted mb-0" id="overallAccuracyLabel">—</p>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-6 col-md-3">
+        <article class="card h-100 overflow-hidden">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="rounded-3 bg-success bg-opacity-10 p-2">
+                    <i class="bi bi-people-fill fs-4 text-success"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="small text-muted mb-0">Сотрудники</p>
+                    <p class="h5 mb-0 fw-bold" id="overallEmployeesValue">—</p>
+                    <span class="small text-muted">активных</span>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-6 col-md-3">
+        <article class="card h-100 overflow-hidden">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="rounded-3 bg-warning bg-opacity-10 p-2">
+                    <i class="bi bi-box-seam fs-4 text-warning"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="small text-muted mb-0">Уникальные МХ</p>
+                    <p class="h5 mb-0 fw-bold text-success" id="overallPlacesValue">—</p>
+                    <span class="small text-muted">за период</span>
+                </div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="row g-4 mb-4">
+    <div class="col-lg-7">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Динамика за 7 дней</h2>
+            </div>
+            <div class="card-body">
+                <canvas id="dailyChart" height="200" aria-label="График динамики сканов"></canvas>
+            </div>
+        </article>
+    </div>
+    <div class="col-lg-5">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Структура расхождений</h2>
+            </div>
+            <div class="card-body">
+                <canvas id="statusChart" height="200" aria-label="Диаграмма расхождений"></canvas>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="row g-4 mb-4">
+    <div class="col-lg-5">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Топ сотрудников</h2>
+            </div>
+            <div class="card-body">
+                <div id="topEmployeesList" class="d-flex flex-column gap-2">
+                    <span class="text-muted small">Нет данных</span>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-lg-7">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3 d-flex justify-content-between align-items-center">
+                <h2 class="h6 mb-0 fw-semibold">Журнал событий</h2>
+                <button class="btn btn-link btn-sm p-0 text-decoration-none" id="clearAdminLog">Очистить</button>
+            </div>
+            <div class="card-body overflow-auto" style="max-height:280px">
+                <div id="adminActivityList" class="small text-muted">Нет событий</div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="card mb-4">
+    <div class="card-header bg-transparent border-bottom py-3 d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0 fw-semibold">Активные задания</h2>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#assignTaskModal">
+            <i class="bi bi-plus-lg me-1"></i>Назначить зону
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Сотрудник</th>
+                        <th>Зона</th>
+                        <th>Назначено</th>
+                        <th>Истекает</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody id="activeTasksTableBody">
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">Нет активных заданий</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="row g-4 mb-4">
+    <div class="col-lg-4">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Типы расхождений</h2>
+            </div>
+            <div class="card-body p-0">
+                <div id="discrepancyTypesList" class="list-group list-group-flush">
+                    <div class="list-group-item text-muted">Нет данных</div>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-lg-4" id="problemZonesBlock">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Проблемные МХ</h2>
+                <p class="small text-muted mb-0 mt-1">Места с наибольшим количеством расхождений</p>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Место</th>
+                                <th class="text-center">Сканов</th>
+                                <th class="text-center">Ошибок</th>
+                            </tr>
+                        </thead>
+                        <tbody id="problemZonesTableBody">
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-3">Нет данных</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-lg-4">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3 d-flex justify-content-between align-items-center">
+                <h2 class="h6 mb-0 fw-semibold">Фотофиксации</h2>
+                <span class="badge bg-info" id="photoGalleryCount">0</span>
+            </div>
+            <div class="card-body overflow-auto" style="max-height:320px">
+                <div id="adminPhotoGrid" class="photo-grid">
+                    <div class="text-muted small">Нет фото</div>
+                </div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3 d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="h6 mb-0 fw-semibold">Контроль качества</h2>
+                    <p class="small text-muted mb-0">Зоны с повторяющимися расхождениями</p>
+                </div>
+                <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#qualityReviewModal">
+                    Новая ревизия
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Зона</th>
+                                <th class="text-center">Сканов</th>
+                                <th class="text-center">Ошибок</th>
+                                <th>Последний скан</th>
+                            </tr>
+                        </thead>
+                        <tbody id="qualityTableBody">
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-3">Нет данных</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <hr class="my-0">
+                <div id="qualityReviewList" class="list-group list-group-flush">
+                    <div class="list-group-item text-muted">Ревизии не назначены</div>
+                </div>
+            </div>
+        </article>
+    </div>
+    <div class="col-lg-6" id="ticketsBlock">
+        <article class="card h-100">
+            <div class="card-header bg-transparent border-bottom py-3">
+                <h2 class="h6 mb-0 fw-semibold">Тикеты и инциденты</h2>
+                <p class="small text-muted mb-0 mt-1">Сообщения сотрудников</p>
+            </div>
+            <div class="card-body overflow-auto" style="max-height:320px">
+                <div id="ticketsBoard">Нет тикетов</div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<aside id="adminStatusBar" class="d-none card border-top">
+    <div class="card-body py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span id="adminStatusBarText">Загрузка показателей…</span>
+        <div class="d-flex gap-2">
+            <span class="badge bg-success" id="adminStatusChipAccuracy">Точность —</span>
+            <span class="badge bg-warning text-dark" id="adminStatusChipWorkload">Нагрузка —</span>
+            <span class="badge bg-danger" id="adminStatusChipRisk">Риски —</span>
+        </div>
+    </div>
+</aside>
+
+<div class="modal fade" id="assignTaskModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Назначить зону сотруднику</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <form id="assignTaskForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="assignBadge">Бэйдж сотрудника</label>
+                        <input type="text" class="form-control" id="assignBadge" name="badge" required placeholder="Например, BADGE-123">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="assignZone">Префикс зоны</label>
+                        <input type="text" class="form-control" id="assignZone" name="zone" required placeholder="Например, Э6.01">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="assignHours">Часы на выполнение</label>
+                        <input type="number" class="form-control" id="assignHours" name="hours" value="2" min="1" max="12">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Назначить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="photoPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="photoPreviewModalLabel">Фотофиксация</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="small text-muted">Управление фотофиксацией</span>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="downloadPhotoBtn">
+                            <i class="bi bi-download me-1"></i>Скачать
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="deletePhotoBtn">
+                            <i class="bi bi-trash me-1"></i>Удалить
+                        </button>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <img id="photoPreviewImg" src="" alt="Фото" class="img-fluid rounded w-100" style="max-height:400px;object-fit:contain">
+                        <div id="photoPreviewMeta" class="small text-muted mt-2"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <p class="small text-muted mb-2">Все фото по выбранному МХ</p>
+                        <div id="photoPreviewThumbs" class="d-flex flex-column gap-2">Нет фото</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="reportsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Отчёты админ-панели</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Файл</th>
+                                <th>Сотрудник</th>
+                                <th>Сканов</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="reportsTableBody">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">Загружаем отчёты…</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="qualityReviewModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Назначить ревизию</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <form id="qualityReviewForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="reviewZone">Зона</label>
+                        <input type="text" class="form-control" id="reviewZone" name="reviewZone" placeholder="Э6.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="reviewStatus">Статус</label>
+                        <select class="form-select" id="reviewStatus" name="reviewStatus">
+                            <option value="planned">Запланирована</option>
+                            <option value="in_progress">В работе</option>
+                            <option value="completed">Завершена</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="reviewSummary">Комментарий</label>
+                        <textarea class="form-control" id="reviewSummary" name="reviewSummary" rows="2" placeholder="Комментарий к ревизии"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
