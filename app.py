@@ -8,6 +8,9 @@ import asyncio
 import logging
 import os
 import sys
+
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime, timedelta
 from pathlib import Path
 

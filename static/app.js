@@ -15,6 +15,11 @@ const PLACE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
 const PLACE_CACHE_MAX = 500;
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
 
+// Ограничение размера фото для отправки (Vercel лимит тела запроса 4.5 MB)
+const MAX_PHOTO_DIMENSION = 1280;
+const PHOTO_JPEG_QUALITY = 0.82;
+const MAX_PHOTO_BASE64_BYTES = 3 * 1024 * 1024; // ~3 MB на фото, чтобы несколько фото + JSON укладывались в 4.5 MB
+
 const PlaceCache = {
     get(key) {
         try {
@@ -1115,6 +1120,56 @@ function initWorkPage() {
         updatePhotoPreview();
     }
 
+    /**
+     * Сжимает изображение (data URL) до разумного размера для отправки на сервер.
+     * На Vercel лимит тела запроса 4.5 MB — без сжатия фото часто не сохраняются.
+     */
+    function compressImageToDataUrl(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                try {
+                    let w = img.naturalWidth || img.width;
+                    let h = img.naturalHeight || img.height;
+                    if (w <= 0 || h <= 0) {
+                        resolve(dataUrl);
+                        return;
+                    }
+                    let scale = 1;
+                    if (w > MAX_PHOTO_DIMENSION || h > MAX_PHOTO_DIMENSION) {
+                        scale = Math.min(MAX_PHOTO_DIMENSION / w, MAX_PHOTO_DIMENSION / h);
+                        w = Math.round(w * scale);
+                        h = Math.round(h * scale);
+                    }
+                    const canvas = document.createElement("canvas");
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) {
+                        resolve(dataUrl);
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0, w, h);
+                    let out = canvas.toDataURL("image/jpeg", PHOTO_JPEG_QUALITY);
+                    // Если всё ещё слишком большое — уменьшаем качество
+                    let bytes = out.length * 0.75;
+                    if (bytes > MAX_PHOTO_BASE64_BYTES) {
+                        for (let q = PHOTO_JPEG_QUALITY; q >= 0.5 && bytes > MAX_PHOTO_BASE64_BYTES; q -= 0.1) {
+                            out = canvas.toDataURL("image/jpeg", Math.max(0.5, q));
+                            bytes = out.length * 0.75;
+                        }
+                    }
+                    resolve(out);
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            img.onerror = () => reject(new Error("Ошибка загрузки изображения"));
+            img.src = dataUrl;
+        });
+    }
+
     function handlePhotoFiles(files) {
         const arr = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith("image/"));
         if (!arr.length) {
@@ -1124,22 +1179,38 @@ function initWorkPage() {
         state.photoLoading = true;
         saveScanBtn?.setAttribute("disabled", "disabled");
         let done = 0;
+        const total = arr.length;
         arr.forEach((file) => {
             const reader = new FileReader();
-            reader.onload = () => {
+            reader.onload = async () => {
                 const dataUrl = reader.result;
-                if (dataUrl) state.photos.push(dataUrl);
+                if (!dataUrl) {
+                    done++;
+                    if (done >= total) {
+                        state.photoLoading = false;
+                        saveScanBtn?.removeAttribute("disabled");
+                        updatePhotoPreview();
+                    }
+                    return;
+                }
+                try {
+                    const compressed = await compressImageToDataUrl(dataUrl);
+                    if (compressed) state.photos.push(compressed);
+                } catch (e) {
+                    console.warn("Сжатие фото не удалось, отправляем как есть", e);
+                    state.photos.push(dataUrl);
+                }
                 done++;
-                if (done >= arr.length) {
+                if (done >= total) {
                     state.photoLoading = false;
                     saveScanBtn?.removeAttribute("disabled");
                     updatePhotoPreview();
-                    logEvent(`Загружено фото: ${arr.length} шт.`, "info");
+                    logEvent(`Загружено фото: ${total} шт.`, "info");
                 }
             };
             reader.onerror = () => {
                 done++;
-                if (done >= arr.length) {
+                if (done >= total) {
                     state.photoLoading = false;
                     saveScanBtn?.removeAttribute("disabled");
                     showAlert(placeAlert, "Ошибка чтения файла", "warning");

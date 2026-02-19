@@ -6,6 +6,7 @@
 При скане пользователю отображаются: этаж, ряд, секция.
 """
 
+import os
 import zipfile
 import csv
 import re
@@ -13,6 +14,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Generator, List, Optional
 import psycopg2
+
+from dotenv import load_dotenv
+load_dotenv()
 from psycopg2.extras import execute_values
 import logging
 
@@ -31,13 +35,13 @@ BATCH_SIZE = 50_000
 # Размер пачки в одном INSERT (execute_values) — больше = меньше круг-трипов к БД
 INSERT_PAGE_SIZE = 15_000
 
-# Конфигурация БД
+# Конфигурация БД (из .env или переменных окружения)
 DB_CONFIG = {
-    'host': '31.207.77.167',
-    'port': 5432,
-    'database': 'botdb',
-    'user': 'aperepechkin',
-    'password': 'password'
+    'host': os.environ.get('DB_HOST', '31.207.77.167'),
+    'port': int(os.environ.get('DB_PORT', '5432')),
+    'database': os.environ.get('DB_NAME', 'botdb'),
+    'user': os.environ.get('DB_USER', 'aperepechkin'),
+    'password': os.environ.get('DB_PASSWORD', 'password'),
 }
 
 
