@@ -1942,7 +1942,7 @@ function initAdminDashboard() {
     const extendTaskButtons = document.getElementById("activeTasksTableBody");
     const reportsTableBody = document.getElementById("reportsTableBody");
     const reportsModalEl = document.getElementById("reportsModal");
-    const blockExportSelect = document.getElementById("blockExportSelect");
+    const whIdExportSelect = document.getElementById("whIdExportSelect");
     const exportBlockBtn = document.getElementById("exportBlockBtn");
     const blockExportStatus = document.getElementById("blockExportStatus");
     const photoPreviewModalEl = document.getElementById("photoPreviewModal");
@@ -2423,7 +2423,7 @@ function initAdminDashboard() {
 
     reportsModalEl?.addEventListener("show.bs.modal", () => {
         loadReports();
-        loadBlocks();
+        loadWhIds();
     });
 
     problemZonesTableBody?.addEventListener("click", (event) => {
@@ -2622,26 +2622,28 @@ function initAdminDashboard() {
         photoPreviewModal?.show();
     }
 
-    async function loadBlocks() {
-        if (!blockExportSelect) return;
-        const { ok, data } = await API.get("/api/admin/blocks");
-        blockExportSelect.innerHTML = "<option value=\"\">Выберите блок</option>";
+    async function loadWhIds() {
+        if (!whIdExportSelect) return;
+        const { ok, data } = await API.get("/api/admin/wh_ids");
+        whIdExportSelect.innerHTML = "<option value=\"\">Выберите wh_id</option>";
         if (!ok || data.error) return;
-        const blocks = data.blocks || [];
-        blocks.forEach((b) => {
+        const list = data.wh_ids || [];
+        list.forEach((item) => {
             const opt = document.createElement("option");
-            opt.value = b;
-            opt.textContent = b;
-            blockExportSelect.appendChild(opt);
+            opt.value = item.wh_id;
+            opt.textContent = item.warehouse_name
+                ? `${item.wh_id} — ${item.warehouse_name}`
+                : String(item.wh_id);
+            whIdExportSelect.appendChild(opt);
         });
     }
 
     exportBlockBtn?.addEventListener("click", async () => {
-        const block = blockExportSelect?.value?.trim();
+        const whId = whIdExportSelect?.value?.trim();
         if (!blockExportStatus) return;
         blockExportStatus.textContent = "";
-        if (!block) {
-            blockExportStatus.textContent = "Выберите блок";
+        if (!whId) {
+            blockExportStatus.textContent = "Выберите wh_id";
             blockExportStatus.className = "small text-warning";
             return;
         }
@@ -2650,7 +2652,7 @@ function initAdminDashboard() {
         blockExportStatus.textContent = "Формируем отчёт…";
         try {
             const base = window.location.origin;
-            const url = `${base}/api/admin/export/block?block=${encodeURIComponent(block)}`;
+            const url = `${base}/api/admin/export/block?wh_id=${encodeURIComponent(whId)}`;
             const res = await fetch(url, { credentials: "include" });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -2659,7 +2661,7 @@ function initAdminDashboard() {
                 return;
             }
             const blob = await res.blob();
-            const name = res.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] || `errors_block_${block}.xlsx`;
+            const name = res.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] || `errors_wh_id_${whId}.xlsx`;
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
             a.download = name;

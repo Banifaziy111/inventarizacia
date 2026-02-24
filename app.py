@@ -2590,9 +2590,9 @@ def get_reports():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/admin/blocks', methods=['GET'])
-def get_blocks():
-    """Список блоков (префиксов МХ: Э6, Э10, …) для выгрузки отчёта по блоку."""
+@app.route('/api/admin/wh_ids', methods=['GET'])
+def get_wh_ids():
+    """Список wh_id (складов) для выгрузки отчёта по складу."""
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
@@ -2600,28 +2600,37 @@ def get_blocks():
         conn = get_db()
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT DISTINCT TRIM(split_part(mx_code, '.', 1)) AS block
+                SELECT DISTINCT wh_id,
+                       MAX(warehouse_name) FILTER (WHERE warehouse_name IS NOT NULL AND warehouse_name != '') AS warehouse_name
                 FROM warehouse_places
-                WHERE mx_code IS NOT NULL AND mx_code != ''
-                ORDER BY 1
+                WHERE wh_id IS NOT NULL
+                GROUP BY wh_id
+                ORDER BY wh_id
             """)
-            blocks = [row['block'] for row in cur.fetchall() if row['block']]
-        return jsonify({'success': True, 'blocks': blocks})
+            wh_ids = [
+                {'wh_id': row['wh_id'], 'warehouse_name': row['warehouse_name'] or ''}
+                for row in cur.fetchall()
+            ]
+        return jsonify({'success': True, 'wh_ids': wh_ids})
     except Exception as e:
-        logger.exception("Ошибка получения списка блоков")
+        logger.exception("Ошибка получения списка wh_id")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/admin/export/block', methods=['GET'])
 def export_block_errors():
-    """Выгрузка общего отчёта по блоку: все ошибки (расхождения) в блоке. Параметр: block (например Э6, Э10)."""
+    """Выгрузка отчёта по складу (wh_id): все ошибки (расхождения) по местам с данным wh_id. Параметр: wh_id."""
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
 
-    block = (request.args.get('block') or '').strip()
-    if not block:
-        return jsonify({'error': 'Укажите блок (например Э6, Э10)'}), 400
+    wh_id_str = request.args.get('wh_id') or request.args.get('block', '').strip()
+    if not wh_id_str:
+        return jsonify({'error': 'Укажите wh_id (например 335, 133)'}), 400
+    try:
+        wh_id = int(wh_id_str)
+    except ValueError:
+        return jsonify({'error': 'wh_id должен быть числом'}), 400
 
     try:
         conn = get_db()
@@ -2652,14 +2661,13 @@ def export_block_errors():
                 LEFT JOIN warehouse_places wp2 ON UPPER(TRIM(wp2.mx_code)) = UPPER(TRIM(ir.place_name))
                     AND ir.place_name IS NOT NULL AND ir.place_name != ''
                 WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
-                  AND (UPPER(TRIM(ir.place_name)) = UPPER(TRIM(%s))
-                       OR UPPER(TRIM(ir.place_name)) LIKE UPPER(TRIM(%s)) || '.%%')
+                  AND (wp.wh_id = %s OR wp2.wh_id = %s)
             """
-            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (block, block))
+            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (wh_id, wh_id))
             rows = cur.fetchall()
 
         if not rows:
-            return jsonify({'error': f'В блоке «{block}» нет записей с расхождениями'}), 404
+            return jsonify({'error': f'По wh_id {wh_id} нет записей с расхождениями'}), 404
 
         def _status_label(s):
             if not s:
@@ -2687,7 +2695,7 @@ def export_block_errors():
 
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = f"Ошибки блок {block}"
+        ws.title = f"Ошибки wh_id {wh_id}"
 
         headers = [
             "Дата/время", "Этаж", "Ряд", "Секция",
@@ -2784,7 +2792,7 @@ def export_block_errors():
         output = BytesIO()
         wb.save(output)
         output.seek(0)
-        filename = f"errors_block_{block}.xlsx"
+        filename = f"errors_wh_id_{wh_id}.xlsx"
         return send_file(
             output,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

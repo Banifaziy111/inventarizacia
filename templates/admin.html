@@ -371,14 +371,14 @@
             <div class="modal-body">
                 <div class="card border mb-3">
                     <div class="card-body">
-                        <h6 class="card-title mb-2"><i class="bi bi-collection me-1"></i>Отчёт по блоку</h6>
-                        <p class="small text-muted mb-2">Выгрузить все ошибки (расхождения) в выбранном блоке (например Э6, Э10).</p>
+                        <h6 class="card-title mb-2"><i class="bi bi-collection me-1"></i>Отчёт по складу (wh_id)</h6>
+                        <p class="small text-muted mb-2">Выгрузить все ошибки (расхождения) по выбранному складу (wh_id).</p>
                         <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <select class="form-select form-select-sm" id="blockExportSelect" style="max-width:140px">
-                                <option value="">Выберите блок</option>
+                            <select class="form-select form-select-sm" id="whIdExportSelect" style="max-width:200px">
+                                <option value="">Выберите wh_id</option>
                             </select>
                             <button type="button" class="btn btn-primary btn-sm" id="exportBlockBtn">
-                                <i class="bi bi-download me-1"></i>Выгрузить ошибки по блоку
+                                <i class="bi bi-download me-1"></i>Выгрузить ошибки по wh_id
                             </button>
                             <span class="small text-muted" id="blockExportStatus"></span>
                         </div>
