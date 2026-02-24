@@ -1459,6 +1459,18 @@ function initWorkPage() {
             return;
         }
 
+        // На Android Chrome камера работает только по HTTPS (secure context)
+        const isSecureContext = window.isSecureContext || (location.protocol === "https:") || (location.hostname === "localhost" && location.port !== "80");
+        if (!isSecureContext) {
+            updateQrStatus("Камера недоступна по HTTP", "danger");
+            showAlert(
+                placeAlert,
+                "Камера доступна только по HTTPS. Откройте сайт по адресу https://… или используйте сканер штрихкодов/ручной ввод.",
+                "danger"
+            );
+            return;
+        }
+
         // Проверяем, что модуль Html5Qrcode загружен
         if (typeof Html5Qrcode === "undefined") {
             updateQrStatus("Модуль сканера не загружен", "danger");
@@ -1484,52 +1496,78 @@ function initWorkPage() {
         try {
             const cameras = await Html5Qrcode.getCameras();
             if (!cameras || !cameras.length) {
-                throw new Error("Камера не найдена");
+                throw new Error("Камера не найдена. Разрешите доступ к камере в настройках браузера/устройства.");
             }
 
             // Пытаемся выбрать тыльную камеру:
             // 1) по facingMode=environment (если браузер поддерживает),
             // 2) по label (back/rear/тыл/задняя и т.п.),
             // 3) иначе — первая доступная.
-            let cameraConfig;
-
-            if ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices) {
-                cameraConfig = { facingMode: "environment" };
-            } else {
-                const lower = (s) => (s || "").toLowerCase();
-                const backCamera =
-                    cameras.find((cam) => {
-                        const label = lower(cam.label);
-                        return (
-                            label.includes("back") ||
-                            label.includes("rear") ||
-                            label.includes("зад") ||
-                            label.includes("тыл")
-                        );
-                    }) || cameras[0];
-                cameraConfig = { deviceId: { exact: backCamera.id } };
-            }
+            const lower = (s) => (s || "").toLowerCase();
+            const backCamera =
+                cameras.find((cam) => {
+                    const label = lower(cam.label);
+                    return (
+                        label.includes("back") ||
+                        label.includes("rear") ||
+                        label.includes("зад") ||
+                        label.includes("тыл") ||
+                        label.includes("environment")
+                    );
+                }) || cameras[0];
 
             const qrbox = Math.min(qrReaderEl.offsetWidth || 280, 320);
+            const scanConfig = { fps: 10, qrbox };
+            const onScan = (decodedText) => {
+                if (!decodedText) return;
+                handleQrResult(decodedText);
+            };
+            const onError = () => {};
 
-            await qrScanner.start(
-                cameraConfig,
-                { fps: 10, qrbox },
-                (decodedText) => {
-                    if (!decodedText) return;
-                    handleQrResult(decodedText);
-                },
-                () => {
-                    /* ignore scan errors */
+            const tryStart = async (cameraConfig) => {
+                await qrScanner.start(cameraConfig, scanConfig, onScan, onError);
+            };
+
+            // Сначала пробуем тыльную камеру (на Android часто нужна именно она для QR)
+            let lastError = null;
+            const configsToTry = [];
+            if ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices) {
+                configsToTry.push({ facingMode: "environment" });
+            }
+            if (backCamera.id) {
+                configsToTry.push({ deviceId: { exact: backCamera.id } });
+            }
+            if (cameras[0] && cameras[0].id) {
+                configsToTry.push(cameras[0].id);
+            }
+            for (const config of configsToTry) {
+                try {
+                    await tryStart(config);
+                    lastError = null;
+                    break;
+                } catch (e) {
+                    lastError = e;
                 }
-            );
+            }
+            if (lastError) {
+                const msg = lastError?.message || String(lastError);
+                const isDenied = /denied|not allowed|permission|NotAllowedError/i.test(msg);
+                throw new Error(
+                    isDenied
+                        ? "Доступ к камере запрещён. Разрешите камеру в настройках сайта (иконка замка/инфо в адресной строке) и обновите страницу."
+                        : msg
+                );
+            }
             updateQrStatus("Наведите камеру на QR-код", "success");
         } catch (error) {
             console.error("QR scanner error", error);
             updateQrStatus(error?.message || "Ошибка камеры", "danger");
+            const hint = /HTTPS|secure|https/i.test(error?.message || "")
+                ? ""
+                : " Убедитесь, что сайт открыт по HTTPS и доступ к камере разрешён.";
             showAlert(
                 placeAlert,
-                "Не удалось запустить камеру. Попробуйте другой браузер/устройство или используйте сканер штрихкодов/ручной ввод.",
+                "Не удалось запустить камеру." + hint + " Попробуйте другой браузер (Chrome) или используйте сканер штрихкодов/ручной ввод.",
                 "danger"
             );
         }

@@ -69,6 +69,14 @@ def service_worker():
     return resp
 
 
+@app.after_request
+def add_camera_permissions_policy(response):
+    """Разрешить камеру в том же origin — иначе на Android Chrome камера может не открываться."""
+    if response.headers.get("Permissions-Policy") is None:
+        response.headers["Permissions-Policy"] = "camera=(self), microphone=(self)"
+    return response
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Простой health-check для фронта."""
@@ -2714,6 +2722,32 @@ def set_block_repaired():
         return jsonify({'success': True, 'is_repaired': request.method == 'POST'})
     except Exception as e:
         logger.exception("Ошибка установки починено")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/zone/clear', methods=['POST'])
+def clear_zone_history():
+    """Удалить всю историю сканов по зоне (place_name начинается с префикса, например Э6). Тело: {"zone": "Э6"}."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+    data = request.get_json(silent=True) or {}
+    zone = (data.get('zone') or '').strip()
+    if not zone:
+        return jsonify({'error': 'Укажите zone в теле запроса (например {"zone": "Э6"})'}), 400
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM inventory_results WHERE place_name IS NOT NULL AND place_name LIKE %s",
+                (zone + '%',),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+        logger.info("Удалено записей по зоне %s: %d", zone, deleted)
+        return jsonify({'success': True, 'zone': zone, 'deleted': deleted})
+    except Exception as e:
+        logger.exception("Ошибка очистки зоны")
         return jsonify({'error': str(e)}), 500
 
 
