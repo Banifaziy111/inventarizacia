@@ -77,11 +77,16 @@ def add_camera_permissions_policy(response):
     return response
 
 
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    """Лёгкая проверка доступности сервера без обращения к БД. Для индикатора «онлайн» на фронте."""
+    return jsonify({'ok': True}), 200
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Простой health-check для фронта."""
+    """Проверка с опросом БД (для мониторинга). При недоступности БД — 503."""
     try:
-        # Лёгкая проверка БД: один SELECT 1
         conn = get_db()
         with conn.cursor() as cur:
             cur.execute("SELECT 1")

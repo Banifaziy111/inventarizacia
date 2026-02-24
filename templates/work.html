@@ -361,8 +361,12 @@
                 <div id="qrReader" class="border rounded overflow-hidden"></div>
                 <p class="text-center mt-2 mb-0"><span class="badge bg-secondary" id="qrStatus">Инициализация</span></p>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            <div class="modal-footer d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="qrTorchBtn" title="Включить фонарик">
+                    <i class="bi bi-flashlight" id="qrTorchIcon"></i>
+                    <span id="qrTorchLabel">Фонарик</span>
+                </button>
+                <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>
     </div>

@@ -407,7 +407,7 @@ function initLoginPage() {
         connectionBadge.textContent = "Проверяем соединение…";
         connectionBadge.className = "badge rounded-pill text-bg-secondary";
 
-        const { ok, data } = await API.get("/api/health");
+        const { ok, data } = await API.get("/api/ping");
         if (ok && data?.ok) {
             connectionBadge.textContent = "Онлайн: связь с сервером";
             connectionBadge.className = "badge rounded-pill text-bg-success";
@@ -542,6 +542,9 @@ function initWorkPage() {
     const qrModalEl = document.getElementById("qrModal");
     const qrReaderEl = document.getElementById("qrReader");
     const qrStatusBadge = document.getElementById("qrStatus");
+    const qrTorchBtn = document.getElementById("qrTorchBtn");
+    const qrTorchIcon = document.getElementById("qrTorchIcon");
+    const qrTorchLabel = document.getElementById("qrTorchLabel");
     const openQrScannerBtn = document.getElementById("openQrScannerBtn");
     const notificationList = document.getElementById("notificationList");
     const clearLogBtn = document.getElementById("clearLogBtn");
@@ -593,7 +596,7 @@ function initWorkPage() {
             onlineBadge.className = "badge bg-danger rounded-pill mt-2";
             return;
         }
-        const { ok, data } = await API.get("/api/health");
+        const { ok, data } = await API.get("/api/ping");
         if (ok && data?.ok) {
             onlineBadge.textContent = "Онлайн";
             onlineBadge.className = "badge bg-success rounded-pill mt-2";
@@ -634,6 +637,8 @@ function initWorkPage() {
     };
     let qrScanner = null;
     let qrModalInstance = null;
+    let qrVideoTrack = null;
+    let qrTorchOn = false;
 
     const STATUS_META = {
         ok: { label: "Совпадает", badge: "success" },
@@ -1423,7 +1428,29 @@ function initWorkPage() {
         return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     }
 
+    function getQrVideoTrack() {
+        const video = qrReaderEl?.querySelector("video");
+        if (!video?.srcObject) return null;
+        const tracks = video.srcObject.getVideoTracks();
+        return tracks.length ? tracks[0] : null;
+    }
+
+    function setTorch(on) {
+        if (!qrVideoTrack) return;
+        qrTorchOn = on;
+        qrVideoTrack.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {});
+        if (qrTorchIcon) qrTorchIcon.className = on ? "bi bi-flashlight-fill" : "bi bi-flashlight";
+        if (qrTorchLabel) qrTorchLabel.textContent = on ? "Выкл. фонарик" : "Фонарик";
+        if (qrTorchBtn) qrTorchBtn.title = on ? "Выключить фонарик" : "Включить фонарик";
+    }
+
     async function stopQrScanner() {
+        if (qrVideoTrack && qrTorchOn) {
+            try { setTorch(false); } catch (e) {}
+            qrVideoTrack = null;
+            qrTorchOn = false;
+        }
+        if (qrTorchBtn) qrTorchBtn.classList.add("d-none");
         if (qrScanner) {
             try {
                 await qrScanner.stop();
@@ -1437,6 +1464,8 @@ function initWorkPage() {
             }
             qrScanner = null;
         }
+        qrVideoTrack = null;
+        qrTorchOn = false;
         updateQrStatus("Сканер остановлен", "secondary");
     }
 
@@ -1559,6 +1588,22 @@ function initWorkPage() {
                 );
             }
             updateQrStatus("Наведите камеру на QR-код", "success");
+            // Поддержка фонарика: ищем видео-трек после запуска сканера
+            setTimeout(() => {
+                const track = getQrVideoTrack();
+                if (track && typeof track.getCapabilities === "function") {
+                    const caps = track.getCapabilities();
+                    if (caps && caps.torch) {
+                        qrVideoTrack = track;
+                        qrTorchOn = false;
+                        if (qrTorchBtn) {
+                            qrTorchBtn.classList.remove("d-none");
+                            qrTorchIcon.className = "bi bi-flashlight";
+                            qrTorchLabel.textContent = "Фонарик";
+                        }
+                    }
+                }
+            }, 300);
         } catch (error) {
             console.error("QR scanner error", error);
             updateQrStatus(error?.message || "Ошибка камеры", "danger");
@@ -1733,6 +1778,10 @@ function initWorkPage() {
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
     qrModalEl?.addEventListener("hidden.bs.modal", stopQrScanner);
+    qrTorchBtn?.addEventListener("click", () => {
+        if (!qrVideoTrack) return;
+        setTorch(!qrTorchOn);
+    });
     incidentForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const formData = new FormData(incidentForm);

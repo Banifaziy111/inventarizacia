@@ -712,6 +712,12 @@ body.scan-only-mode .scan-only-only {
     box-shadow: 0 0 0 1px rgba(5, 150, 105, 0.3);
 }
 
+/* ========== ADMIN ========== */
+.admin-header .btn { white-space: nowrap; }
+.admin-kpi-card .card-body { padding: 0.75rem 1rem; }
+.admin-kpi-icon { width: 2.5rem; height: 2.5rem; display: flex; align-items: center; justify-content: center; }
+.list-group-sm .list-group-item { padding: 0.35rem 1rem; font-size: 0.875rem; }
+
 /* ========== RESPONSIVE ========== */
 @media (max-width: 576px) {
     .card-body { padding: 1rem; }
