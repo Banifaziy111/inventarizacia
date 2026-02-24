@@ -925,7 +925,7 @@ def export_user_history():
 
             ws.append(
                 [
-                    created.isoformat(sep=" ") if created else "",
+                    created.strftime("%Y-%m-%d %H:%M") if created else "",
                     floor_val if floor_val is not None else "",
                     row_num_val if row_num_val is not None else "",
                     section_val if section_val is not None else "",
@@ -2775,7 +2775,7 @@ def export_block_errors():
                     pass
 
             ws.append([
-                created.isoformat(sep=" ") if created else "",
+                created.strftime("%Y-%m-%d %H:%M") if created else "",
                 floor_val if floor_val is not None else "",
                 row_num_val if row_num_val is not None else "",
                 section_val if section_val is not None else "",
