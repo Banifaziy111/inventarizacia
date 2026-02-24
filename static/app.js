@@ -1945,6 +1945,9 @@ function initAdminDashboard() {
     const whIdExportSelect = document.getElementById("whIdExportSelect");
     const exportBlockBtn = document.getElementById("exportBlockBtn");
     const blockExportStatus = document.getElementById("blockExportStatus");
+    const blockRepairedSection = document.getElementById("blockRepairedSection");
+    const blockPlacesBody = document.getElementById("blockPlacesBody");
+    const blockPlacesCount = document.getElementById("blockPlacesCount");
     const photoPreviewModalEl = document.getElementById("photoPreviewModal");
     const photoPreviewImg = document.getElementById("photoPreviewImg");
     const photoPreviewMeta = document.getElementById("photoPreviewMeta");
@@ -2637,6 +2640,63 @@ function initAdminDashboard() {
             whIdExportSelect.appendChild(opt);
         });
     }
+
+    async function loadBlockPlaces(whId) {
+        if (!blockRepairedSection || !blockPlacesBody || !blockPlacesCount) return;
+        blockRepairedSection.style.display = "none";
+        blockPlacesBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Загрузка…</td></tr>";
+        const { ok, data } = await API.get(`/api/admin/block/errors?wh_id=${encodeURIComponent(whId)}`);
+        if (!ok || data.error) {
+            blockPlacesBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-2">${data.error || "Ошибка загрузки"}</td></tr>`;
+            blockRepairedSection.style.display = "block";
+            return;
+        }
+        const places = data.places || [];
+        if (places.length === 0) {
+            blockPlacesBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Нет мест с ошибками по этому складу</td></tr>";
+            blockPlacesCount.textContent = "";
+        } else {
+            blockPlacesBody.innerHTML = places.map((p) => {
+                const repaired = p.is_repaired ? "checked" : "";
+                const rowClass = p.is_repaired ? "table-success" : "";
+                return `<tr class="${rowClass}" data-place-cod="${p.place_cod}">
+                    <td>${(p.place_name || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")} / ${String(p.place_cod)}</td>
+                    <td>${p.floor != null ? p.floor : "—"}</td>
+                    <td>${p.row_num != null ? p.row_num : "—"}</td>
+                    <td>${p.section != null ? p.section : "—"}</td>
+                    <td class="text-center">
+                        <input type="checkbox" class="form-check-input repaired-cb" ${repaired} data-place-cod="${p.place_cod}" aria-label="Починено">
+                    </td>
+                </tr>`;
+            }).join("");
+            const repairedCount = places.filter((p) => p.is_repaired).length;
+            blockPlacesCount.textContent = `Мест: ${places.length}, починено: ${repairedCount}. Починенные не попадают в выгрузку.`;
+            blockPlacesBody.querySelectorAll(".repaired-cb").forEach((cb) => {
+                cb.addEventListener("change", async function () {
+                    const placeCod = this.dataset.placeCod;
+                    const isRepaired = this.checked;
+                    const method = isRepaired ? "POST" : "DELETE";
+                    const body = isRepaired ? JSON.stringify({ wh_id: parseInt(whId, 10), place_cod: parseInt(placeCod, 10) }) : undefined;
+                    const url = isRepaired ? "/api/admin/block/repaired" : `/api/admin/block/repaired?wh_id=${encodeURIComponent(whId)}&place_cod=${encodeURIComponent(placeCod)}`;
+                    const res = await fetch(url, { method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body });
+                    const json = await res.json().catch(() => ({}));
+                    if (res.ok && json.success) {
+                        const row = this.closest("tr");
+                        if (row) row.classList.toggle("table-success", isRepaired);
+                    } else {
+                        this.checked = !isRepaired;
+                    }
+                });
+            });
+        }
+        blockRepairedSection.style.display = "block";
+    }
+
+    whIdExportSelect?.addEventListener("change", () => {
+        const whId = whIdExportSelect.value?.trim();
+        if (whId) loadBlockPlaces(whId);
+        else if (blockRepairedSection) blockRepairedSection.style.display = "none";
+    });
 
     exportBlockBtn?.addEventListener("click", async () => {
         const whId = whIdExportSelect?.value?.trim();

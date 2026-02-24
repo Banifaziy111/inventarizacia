@@ -258,6 +258,15 @@ def ensure_tasks_table():
                     resolver VARCHAR(100)
                 )
             """)
+            # Починенные места по блоку (wh_id): не попадают в отчёт по складу
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS repaired_places (
+                    wh_id INTEGER NOT NULL,
+                    place_cod BIGINT NOT NULL,
+                    marked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (wh_id, place_cod)
+                )
+            """)
             
             # Индексы
             cur.execute("""
@@ -303,6 +312,10 @@ def ensure_tasks_table():
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_reports_created 
                 ON reports(created_at DESC)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_repaired_places_wh 
+                ON repaired_places(wh_id)
             """)
             
             conn.commit()
@@ -2617,6 +2630,93 @@ def get_wh_ids():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/block/errors', methods=['GET'])
+def get_block_errors():
+    """Список мест с ошибками по wh_id с флагом is_repaired для админки (отметка починенных)."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+    wh_id_str = request.args.get('wh_id', '').strip()
+    if not wh_id_str:
+        return jsonify({'error': 'Укажите wh_id'}), 400
+    try:
+        wh_id = int(wh_id_str)
+    except ValueError:
+        return jsonify({'error': 'wh_id должен быть числом'}), 400
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (ir.place_cod)
+                    ir.place_cod,
+                    ir.place_name,
+                    COALESCE(wp.floor, wp2.floor) AS floor,
+                    COALESCE(wp.row_num, wp2.row_num) AS row_num,
+                    COALESCE(wp.section, wp2.section) AS section,
+                    (EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod)) AS is_repaired
+                FROM inventory_results ir
+                LEFT JOIN warehouse_places wp ON wp.mx_id = ir.place_cod
+                LEFT JOIN warehouse_places wp2 ON UPPER(TRIM(wp2.mx_code)) = UPPER(TRIM(ir.place_name))
+                    AND ir.place_name IS NOT NULL AND ir.place_name != ''
+                WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
+                  AND (wp.wh_id = %s OR wp2.wh_id = %s)
+                ORDER BY ir.place_cod, ir.created_at DESC
+            """, (wh_id, wh_id, wh_id))
+            rows = cur.fetchall()
+        places = [
+            {
+                'place_cod': r['place_cod'],
+                'place_name': r['place_name'] or '',
+                'floor': r['floor'],
+                'row_num': r['row_num'],
+                'section': r['section'],
+                'is_repaired': bool(r['is_repaired']),
+            }
+            for r in rows
+        ]
+        return jsonify({'success': True, 'wh_id': wh_id, 'places': places})
+    except Exception as e:
+        logger.exception("Ошибка получения мест по блоку")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/block/repaired', methods=['POST', 'DELETE'])
+def set_block_repaired():
+    """Отметить место как починено (POST) или снять отметку (DELETE). Тело/query: wh_id, place_cod."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        wh_id_raw = data.get('wh_id')
+        place_cod_raw = data.get('place_cod')
+    else:
+        wh_id_raw = request.args.get('wh_id')
+        place_cod_raw = request.args.get('place_cod')
+    if wh_id_raw is None or place_cod_raw is None:
+        return jsonify({'error': 'Нужны wh_id и place_cod'}), 400
+    try:
+        wh_id = int(wh_id_raw)
+        place_cod = int(place_cod_raw)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'wh_id и place_cod должны быть числами'}), 400
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            if request.method == 'POST':
+                cur.execute("""
+                    INSERT INTO repaired_places (wh_id, place_cod) VALUES (%s, %s)
+                    ON CONFLICT (wh_id, place_cod) DO NOTHING
+                """, (wh_id, place_cod))
+            else:
+                cur.execute("DELETE FROM repaired_places WHERE wh_id = %s AND place_cod = %s", (wh_id, place_cod))
+        conn.commit()
+        return jsonify({'success': True, 'is_repaired': request.method == 'POST'})
+    except Exception as e:
+        logger.exception("Ошибка установки починено")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/export/block', methods=['GET'])
 def export_block_errors():
     """Выгрузка отчёта по складу (wh_id): все ошибки (расхождения) по местам с данным wh_id. Параметр: wh_id."""
@@ -2662,8 +2762,9 @@ def export_block_errors():
                     AND ir.place_name IS NOT NULL AND ir.place_name != ''
                 WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
                   AND (wp.wh_id = %s OR wp2.wh_id = %s)
+                  AND NOT EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod)
             """
-            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (wh_id, wh_id))
+            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (wh_id, wh_id, wh_id))
             rows = cur.fetchall()
 
         if not rows:
