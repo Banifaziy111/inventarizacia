@@ -1,10 +1,1 @@
-{
-  "name": "Инвентаризация МХ",
-  "short_name": "Инвентаризация",
-  "description": "Складская инвентаризация мест хранения",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#f1f5f9",
-  "theme_color": "#0d9488",
-  "orientation": "portrait-primary"
-}
+{"name":"Инвентаризация МХ","short_name":"Инвентаризация","description":"Складская инвентаризация мест хранения","start_url":"/","display":"standalone","background_color":"#f5f3f7","theme_color":"#6E2B62","orientation":"portrait-primary"}

@@ -439,14 +439,17 @@ def work():
 
 @app.route('/admin')
 def admin():
-    """Редирект на общую форму входа в режиме администратора."""
-    return redirect('/?admin=1')
+    """Страница входа в админ-панель. Если уже авторизован — редирект в дашборд."""
+    admin_badge = request.cookies.get('admin_badge')
+    if admin_badge and admin_badge == 'ADMIN':
+        return redirect('/admin/dashboard')
+    return render_template('admin_login.html')
 
 
 @app.route('/admin_login')
 def admin_login_legacy():
     """Старый путь для обратной совместимости."""
-    return redirect('/?admin=1')
+    return redirect('/admin')
 
 
 @app.route('/admin/dashboard')
@@ -2584,6 +2587,212 @@ def get_reports():
     
     except Exception as e:
         logger.exception("Ошибка получения отчетов")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/blocks', methods=['GET'])
+def get_blocks():
+    """Список блоков (префиксов МХ: Э6, Э10, …) для выгрузки отчёта по блоку."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT TRIM(split_part(mx_code, '.', 1)) AS block
+                FROM warehouse_places
+                WHERE mx_code IS NOT NULL AND mx_code != ''
+                ORDER BY 1
+            """)
+            blocks = [row['block'] for row in cur.fetchall() if row['block']]
+        return jsonify({'success': True, 'blocks': blocks})
+    except Exception as e:
+        logger.exception("Ошибка получения списка блоков")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/export/block', methods=['GET'])
+def export_block_errors():
+    """Выгрузка общего отчёта по блоку: все ошибки (расхождения) в блоке. Параметр: block (например Э6, Э10)."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+
+    block = (request.args.get('block') or '').strip()
+    if not block:
+        return jsonify({'error': 'Укажите блок (например Э6, Э10)'}), 400
+
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            query = """
+                SELECT 
+                    ir.result_id,
+                    ir.created_at,
+                    ir.place_cod,
+                    ir.place_name,
+                    ir.badge,
+                    ir.qty_shk_db,
+                    ir.qty_shk_fact,
+                    ir.status,
+                    ir.has_discrepancy,
+                    ir.photo_filename,
+                    ir.discrepancy_reason,
+                    ir.comment,
+                    wp.storage_type,
+                    wp.box_type,
+                    wp.category,
+                    wp.dimensions,
+                    COALESCE(wp.floor, wp2.floor) AS floor,
+                    COALESCE(wp.row_num, wp2.row_num) AS row_num,
+                    COALESCE(wp.section, wp2.section) AS section
+                FROM inventory_results ir
+                LEFT JOIN warehouse_places wp ON wp.mx_id = ir.place_cod
+                LEFT JOIN warehouse_places wp2 ON UPPER(TRIM(wp2.mx_code)) = UPPER(TRIM(ir.place_name))
+                    AND ir.place_name IS NOT NULL AND ir.place_name != ''
+                WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
+                  AND (UPPER(TRIM(ir.place_name)) = UPPER(TRIM(%s))
+                       OR UPPER(TRIM(ir.place_name)) LIKE UPPER(TRIM(%s)) || '.%%')
+            """
+            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (block, block))
+            rows = cur.fetchall()
+
+        if not rows:
+            return jsonify({'error': f'В блоке «{block}» нет записей с расхождениями'}), 404
+
+        def _status_label(s):
+            if not s:
+                return ""
+            s = (s or "").lower()
+            if s == "ok": return "Совпадает"
+            if s == "error": return "Ошибка"
+            if s == "shelf_error": return "Поломалось"
+            if s == "missing": return "Отсутствует"
+            return s
+
+        def _err_desc(reason, comment):
+            parts = []
+            if reason:
+                parts.append(str(reason).strip())
+            if comment:
+                parts.append(f"Коммент.: {str(comment).strip()}")
+            return " | ".join(parts) if parts else "—"
+
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from openpyxl.drawing.image import Image as XlImage
+        from openpyxl.utils import get_column_letter
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = f"Ошибки блок {block}"
+
+        headers = [
+            "Дата/время", "Этаж", "Ряд", "Секция",
+            "Код МХ", "ID места", "Сотрудник",
+            "Статус", "Причина/коммент.", "Фото"
+        ]
+        ws.append(headers)
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.alignment = Alignment(horizontal="center")
+            cell.fill = header_fill
+
+        photo_col = len(headers)
+        row_height = 75
+        img_max_height = 60
+        MAX_EMBEDDED_PHOTOS = 100
+
+        for excel_row_idx, row in enumerate(rows, start=2):
+            created = row["created_at"]
+            has_photo = bool(row.get("photo_filename"))
+            photo_data = None
+            if has_photo and row.get("result_id") and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
+                with conn.cursor() as cur_ph:
+                    cur_ph.execute(
+                        "SELECT photo_data FROM inventory_results WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
+                        (row["result_id"],),
+                    )
+                    ph_row = cur_ph.fetchone()
+                    if ph_row:
+                        photo_data = ph_row.get("photo_data")
+                    if not photo_data:
+                        cur_ph.execute(
+                            "SELECT photo_data FROM inventory_result_photos WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
+                            (row["result_id"],),
+                        )
+                        ph_row = cur_ph.fetchone()
+                        if ph_row:
+                            photo_data = ph_row.get("photo_data")
+
+            photo_cell_value = "есть" if has_photo else ""
+            if has_photo and photo_data and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
+                try:
+                    raw = photo_data
+                    if hasattr(raw, "tobytes"):
+                        raw = raw.tobytes()
+                    elif not isinstance(raw, bytes):
+                        raw = bytes(raw)
+                    if raw:
+                        img_io = BytesIO(raw)
+                        img_io.seek(0)
+                        xl_img = XlImage(img_io)
+                        if xl_img.height and xl_img.height > img_max_height:
+                            ratio = img_max_height / xl_img.height
+                            xl_img.height = img_max_height
+                            xl_img.width = int(xl_img.width * ratio)
+                        xl_img.anchor = f"{get_column_letter(photo_col)}{excel_row_idx}"
+                        ws.add_image(xl_img)
+                        ws.row_dimensions[excel_row_idx].height = row_height
+                        photo_cell_value = ""
+                except Exception as e:
+                    logger.warning("Фото в отчёт по блоку (result_id=%s): %s", row.get("result_id"), e)
+
+            floor_val = row.get("floor")
+            row_num_val = row.get("row_num")
+            section_val = row.get("section")
+            if (floor_val is None or row_num_val is None or section_val is None) and row.get("place_name"):
+                parts = str(row["place_name"]).strip().split(".")
+                try:
+                    if floor_val is None and len(parts) >= 2:
+                        floor_val = int(parts[1])
+                    if row_num_val is None and len(parts) >= 3:
+                        row_num_val = int(parts[2])
+                    if section_val is None and len(parts) >= 4:
+                        section_val = int(parts[3])
+                except (ValueError, IndexError):
+                    pass
+
+            ws.append([
+                created.isoformat(sep=" ") if created else "",
+                floor_val if floor_val is not None else "",
+                row_num_val if row_num_val is not None else "",
+                section_val if section_val is not None else "",
+                row["place_name"],
+                row["place_cod"],
+                row.get("badge") or "",
+                _status_label(row.get("status")),
+                _err_desc(row.get("discrepancy_reason"), row.get("comment")),
+                photo_cell_value,
+            ])
+
+        ws.column_dimensions[get_column_letter(photo_col)].width = 18
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        filename = f"errors_block_{block}.xlsx"
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        logger.exception("Ошибка выгрузки отчёта по блоку")
         return jsonify({'error': str(e)}), 500
 
 

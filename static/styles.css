@@ -6,25 +6,28 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
 
 :root {
+    /* Pantone: 675C (primary), 2395C (fuchsia), 254C (purple), 2617C (dark purple) */
     --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
-    --primary: #0d9488;
-    --primary-hover: #0f766e;
-    --primary-light: rgba(13, 148, 136, 0.12);
-    --accent: #f59e0b;
-    --accent-light: rgba(245, 158, 11, 0.12);
+    --primary: #6E2B62;
+    --primary-hover: #5A2352;
+    --primary-light: rgba(110, 43, 98, 0.12);
+    --gradient-primary: linear-gradient(135deg, #D6006E 0%, #7B2D8E 45%, #3D2C5C 100%);
+    --gradient-primary-h: linear-gradient(90deg, #D6006E 0%, #7B2D8E 50%, #3D2C5C 100%);
+    --accent: #D6006E;
+    --accent-light: rgba(214, 0, 110, 0.12);
     --success: #059669;
     --danger: #dc2626;
     --danger-light: rgba(220, 38, 38, 0.1);
-    --warning: #d97706;
-    --info: #0891b2;
-    --bg-page: #f1f5f9;
+    --warning: #b45309;
+    --info: #7B2D8E;
+    --bg-page: #f5f3f7;
     --bg-surface: #ffffff;
     --bg-elevated: #ffffff;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-muted: #64748b;
-    --border: #e2e8f0;
-    --border-strong: #cbd5e1;
+    --text-primary: #1a0f1a;
+    --text-secondary: #4a3d4a;
+    --text-muted: #6b5d6b;
+    --border: #e8e2e8;
+    --border-strong: #d5cbd5;
     --radius-sm: 0.5rem;
     --radius: 0.75rem;
     --radius-lg: 1rem;
@@ -35,22 +38,24 @@
 }
 
 [data-theme="dark"] {
-    --primary: #14b8a6;
-    --primary-hover: #2dd4bf;
-    --primary-light: rgba(20, 184, 166, 0.15);
-    --accent: #fbbf24;
-    --accent-light: rgba(251, 191, 36, 0.15);
+    --primary: #9B4D8F;
+    --primary-hover: #B56BA8;
+    --primary-light: rgba(155, 77, 143, 0.2);
+    --gradient-primary: linear-gradient(135deg, #E4007C 0%, #8B3D9E 45%, #4D3C6C 100%);
+    --gradient-primary-h: linear-gradient(90deg, #E4007C 0%, #8B3D9E 50%, #4D3C6C 100%);
+    --accent: #E4007C;
+    --accent-light: rgba(228, 0, 124, 0.2);
     --success: #10b981;
     --danger: #ef4444;
     --danger-light: rgba(239, 68, 68, 0.15);
-    --bg-page: #0f172a;
-    --bg-surface: #1e293b;
-    --bg-elevated: #334155;
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --text-muted: #94a3b8;
-    --border: #334155;
-    --border-strong: #475569;
+    --bg-page: #1a121a;
+    --bg-surface: #261f26;
+    --bg-elevated: #352d35;
+    --text-primary: #f5f0f5;
+    --text-secondary: #c8c0c8;
+    --text-muted: #9a8f9a;
+    --border: #352d35;
+    --border-strong: #4a3d4a;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.5);
@@ -115,13 +120,15 @@ main {
 
 /* ========== BUTTONS ========== */
 .btn-primary {
-    background: var(--primary);
-    border-color: var(--primary);
+    background: var(--gradient-primary);
+    border: none;
+    color: #fff;
 }
 
 .btn-primary:hover {
-    background: var(--primary-hover);
-    border-color: var(--primary-hover);
+    opacity: 0.95;
+    filter: brightness(1.05);
+    color: #fff;
 }
 
 .btn-outline-primary {
@@ -267,7 +274,7 @@ body[data-theme="dark"] .theme-toggle-thumb {
 
 .route-node.highlight:hover {
     border-color: var(--danger);
-    background: rgba(220, 38, 38, 0.18);
+    background: var(--danger-light);
 }
 
 .route-node.scanned {
@@ -437,7 +444,7 @@ body[data-theme="dark"] .theme-toggle-thumb {
 }
 
 .hero-card {
-    background: linear-gradient(135deg, var(--primary) 0%, #0f766e 100%);
+    background: var(--gradient-primary);
     color: #fff;
     border: none;
 }
@@ -485,14 +492,14 @@ body[data-theme="dark"] .theme-toggle-thumb {
 }
 
 .place-card-mx.is-loaded {
-    box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(13, 148, 136, 0.15);
+    box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(110, 43, 98, 0.15);
     animation: placeCardLoaded 0.5s ease-out;
 }
 
 @keyframes placeCardLoaded {
     0% { box-shadow: 0 0 0 1px var(--primary-light); }
-    50% { box-shadow: 0 0 0 3px var(--primary-light), 0 4px 24px rgba(13, 148, 136, 0.25); }
-    100% { box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(13, 148, 136, 0.15); }
+    50% { box-shadow: 0 0 0 3px var(--primary-light), 0 4px 24px rgba(110, 43, 98, 0.25); }
+    100% { box-shadow: 0 0 0 1px var(--primary-light), 0 4px 20px rgba(110, 43, 98, 0.15); }
 }
 
 /* ========== PROGRESS CARDS ========== */
@@ -512,7 +519,7 @@ body[data-theme="dark"] .theme-toggle-thumb {
 
 .progress-card .progress-bar {
     transition: width 0.6s ease-out;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--primary-hover) 100%);
+    background: var(--gradient-primary-h);
 }
 
 .progress-card .progress-bar.bg-success {
@@ -554,12 +561,12 @@ body[data-theme="dark"] .theme-toggle-thumb {
 /* ========== FAB BUTTON ========== */
 #fabScanBtn {
     transition: transform 0.2s, box-shadow 0.2s;
-    box-shadow: 0 4px 16px rgba(13, 148, 136, 0.35);
+    box-shadow: 0 4px 16px rgba(110, 43, 98, 0.35);
 }
 
 #fabScanBtn:hover {
     transform: scale(1.08);
-    box-shadow: 0 8px 28px rgba(13, 148, 136, 0.5) !important;
+    box-shadow: 0 8px 28px rgba(110, 43, 98, 0.5) !important;
 }
 
 #fabScanBtn:active {
@@ -617,7 +624,7 @@ body[data-theme="dark"] .theme-toggle-thumb {
 /* ========== SCAN HERO (блок ввода кода МХ) ========== */
 .scan-hero {
     border-left: 4px solid var(--primary);
-    background: linear-gradient(135deg, var(--bg-surface) 0%, rgba(13, 148, 136, 0.04) 100%);
+    background: linear-gradient(135deg, var(--bg-surface) 0%, rgba(110, 43, 98, 0.06) 100%);
 }
 
 .scan-hero .input-group-text {
@@ -693,7 +700,7 @@ body.scan-only-mode .scan-only-only {
 
 .place-card-mx.swipe-left .place-card-body {
     transform: translateX(-6px);
-    background: rgba(220, 38, 38, 0.06);
+    background: var(--danger-light);
 }
 
 .place-card-mx.swipe-right .place-card-body {

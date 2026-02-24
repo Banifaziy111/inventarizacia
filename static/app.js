@@ -967,7 +967,7 @@ function initWorkPage() {
                 data: {
                     labels,
                     datasets: [
-                        { label: "Всего", data: totals, backgroundColor: "rgba(13, 148, 136, 0.6)" },
+                        { label: "Всего", data: totals, backgroundColor: "rgba(110, 43, 98, 0.6)" },
                         { label: "Без расх.", data: okData, backgroundColor: "rgba(5, 150, 105, 0.6)" },
                         { label: "Расхожд.", data: errors, backgroundColor: "rgba(220, 38, 38, 0.6)" },
                     ],
@@ -1942,6 +1942,9 @@ function initAdminDashboard() {
     const extendTaskButtons = document.getElementById("activeTasksTableBody");
     const reportsTableBody = document.getElementById("reportsTableBody");
     const reportsModalEl = document.getElementById("reportsModal");
+    const blockExportSelect = document.getElementById("blockExportSelect");
+    const exportBlockBtn = document.getElementById("exportBlockBtn");
+    const blockExportStatus = document.getElementById("blockExportStatus");
     const photoPreviewModalEl = document.getElementById("photoPreviewModal");
     const photoPreviewImg = document.getElementById("photoPreviewImg");
     const photoPreviewMeta = document.getElementById("photoPreviewMeta");
@@ -2420,6 +2423,7 @@ function initAdminDashboard() {
 
     reportsModalEl?.addEventListener("show.bs.modal", () => {
         loadReports();
+        loadBlocks();
     });
 
     problemZonesTableBody?.addEventListener("click", (event) => {
@@ -2617,6 +2621,59 @@ function initAdminDashboard() {
         }
         photoPreviewModal?.show();
     }
+
+    async function loadBlocks() {
+        if (!blockExportSelect) return;
+        const { ok, data } = await API.get("/api/admin/blocks");
+        blockExportSelect.innerHTML = "<option value=\"\">Выберите блок</option>";
+        if (!ok || data.error) return;
+        const blocks = data.blocks || [];
+        blocks.forEach((b) => {
+            const opt = document.createElement("option");
+            opt.value = b;
+            opt.textContent = b;
+            blockExportSelect.appendChild(opt);
+        });
+    }
+
+    exportBlockBtn?.addEventListener("click", async () => {
+        const block = blockExportSelect?.value?.trim();
+        if (!blockExportStatus) return;
+        blockExportStatus.textContent = "";
+        if (!block) {
+            blockExportStatus.textContent = "Выберите блок";
+            blockExportStatus.className = "small text-warning";
+            return;
+        }
+        exportBlockBtn.disabled = true;
+        blockExportStatus.className = "small text-muted";
+        blockExportStatus.textContent = "Формируем отчёт…";
+        try {
+            const base = window.location.origin;
+            const url = `${base}/api/admin/export/block?block=${encodeURIComponent(block)}`;
+            const res = await fetch(url, { credentials: "include" });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                blockExportStatus.textContent = err.error || `Ошибка ${res.status}`;
+                blockExportStatus.className = "small text-danger";
+                return;
+            }
+            const blob = await res.blob();
+            const name = res.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] || `errors_block_${block}.xlsx`;
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = name;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            blockExportStatus.textContent = "Скачано";
+            blockExportStatus.className = "small text-success";
+        } catch (e) {
+            blockExportStatus.textContent = "Ошибка: " + (e.message || "сеть");
+            blockExportStatus.className = "small text-danger";
+        } finally {
+            exportBlockBtn.disabled = false;
+        }
+    });
 
     async function loadReports() {
         const { ok, data } = await API.get("/api/admin/reports");
