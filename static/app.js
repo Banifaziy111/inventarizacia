@@ -1097,7 +1097,7 @@ function initWorkPage() {
             }
         }
 
-        const { ok, data } = await API.get(`/api/place/${placeCod}`);
+        const { ok, data } = await API.get(`/api/place/${encodeURIComponent(placeCod)}`);
         if (!ok || data.error) {
             const errorMessage = data.error || "Место не найдено";
             showAlert(placeAlert, errorMessage);
@@ -1832,8 +1832,8 @@ function initWorkPage() {
             return;
         }
         const placeCod = normalizePlaceCode(placeInput.value) || placeInput.value.trim().toUpperCase();
-        if (!placeCod || !/^[А-ЯЁA-Z0-9\.]+$/i.test(placeCod)) {
-            showAlert(placeAlert, "Код МХ должен содержать только буквы, цифры и точки");
+        if (!placeCod || !/^[А-ЯЁA-Z0-9.\-]+$/i.test(placeCod)) {
+            showAlert(placeAlert, "Код МХ: только буквы, цифры, точки и дефис");
             return;
         }
         placeInput.value = placeCod;
@@ -1844,7 +1844,7 @@ function initWorkPage() {
         if (event.key === "Enter") {
             event.preventDefault();
             const placeCod = normalizePlaceCode(placeInput.value) || placeInput.value.trim().toUpperCase();
-            if (placeCod && /^[А-ЯЁA-Z0-9\.]+$/i.test(placeCod)) {
+            if (placeCod && /^[А-ЯЁA-Z0-9.\-]+$/i.test(placeCod)) {
                 placeInput.value = placeCod;
                 loadPlace(placeCod);
             } else {

@@ -1153,8 +1153,9 @@ def get_place(place_cod):
                     """,
                     (place_cod_int,),
                 )
+                row = cur.fetchone()
             else:
-                # Поиск по строковому mx_code
+                # Поиск по строковому mx_code (точное совпадение с TRIM, затем без учёта пробелов)
                 cur.execute(
                     """
                     SELECT 
@@ -1174,12 +1175,38 @@ def get_place(place_cod):
                         current_occupancy,
                         updated_at
                     FROM warehouse_places
-                    WHERE UPPER(mx_code) = %s
+                    WHERE UPPER(TRIM(mx_code)) = UPPER(TRIM(%s))
                     """,
                     (place_cod_str,),
                 )
-            
-            row = cur.fetchone()
+                row = cur.fetchone()
+                if not row:
+                    # Запасной вариант: поиск по совпадению без лишних пробелов внутри
+                    cur.execute(
+                        """
+                        SELECT 
+                            mx_id as place_cod, 
+                            mx_code as place_name, 
+                            0 as qty_shk,
+                            storage_type,
+                            box_type,
+                            dimensions,
+                            category,
+                            floor,
+                            row_num,
+                            section,
+                            shelf,
+                            cell,
+                            current_volume,
+                            current_occupancy,
+                            updated_at
+                        FROM warehouse_places
+                        WHERE REPLACE(UPPER(mx_code), ' ', '') = REPLACE(UPPER(TRIM(%s)), ' ', '')
+                        LIMIT 1
+                        """,
+                        (place_cod_str,),
+                    )
+                    row = cur.fetchone()
 
         if not row:
             return jsonify({'error': 'Место не найдено'}), 404
