@@ -94,21 +94,29 @@ def health_check():
         return jsonify({'ok': True}), 200
     except Exception as exc:
         logger.warning("Health-check failed: %s", exc)
-        return jsonify({'ok': False, 'error': 'Проблема соединения с сервером'}), 503
+        err_msg = "Проблема соединения с сервером"
+        if IS_VERCEL:
+            err_msg = f"{err_msg} ({type(exc).__name__})"
+        return jsonify({'ok': False, 'error': err_msg}), 503
 
 
 def get_db():
     """Получить подключение к БД. На Vercel — одно соединение на запрос (хранится в g), после ответа закрывается."""
     if IS_VERCEL:
         if getattr(g, "db_conn", None) is None or g.db_conn.closed:
-            g.db_conn = psycopg2.connect(
-                host=DB_CONFIG.host,
-                port=DB_CONFIG.port,
-                database=DB_CONFIG.database,
-                user=DB_CONFIG.user,
-                password=DB_CONFIG.password,
-                cursor_factory=RealDictCursor,
-            )
+            connect_kw = {
+                "host": DB_CONFIG.host,
+                "port": DB_CONFIG.port,
+                "database": DB_CONFIG.database,
+                "user": DB_CONFIG.user,
+                "password": DB_CONFIG.password,
+                "cursor_factory": RealDictCursor,
+                "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
+            }
+            sslmode = os.environ.get("DB_SSLMODE", "").strip().lower()
+            if sslmode:
+                connect_kw["sslmode"] = sslmode
+            g.db_conn = psycopg2.connect(**connect_kw)
             ensure_tasks_table()
         return g.db_conn
     global db_connection
