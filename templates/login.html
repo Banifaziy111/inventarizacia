@@ -3,49 +3,64 @@
 {% block title %}Вход в систему{% endblock %}
 
 {% block content %}
-<div class="row g-4 align-items-center min-vh-75">
-    <div class="col-lg-6">
-        <div class="card hero-card p-4 p-lg-5">
-            <span class="badge bg-white bg-opacity-25 mb-3">Сканирование склада</span>
-            <h1 class="h3 fw-bold mb-3 text-white">Актуализация мест хранения</h1>
-            <p class="opacity-75 text-white mb-0">
-                Приложение для проверки МХ и фиксации результатов инвентаризации.
-            </p>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card glass-panel p-4 p-lg-5" id="loginCard">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2 class="h5 fw-bold mb-1">Вход по бэйджу</h2>
-                    <p class="text-muted small mb-0">Введите номер пропуска сотрудника</p>
-                </div>
-                <span class="badge bg-secondary rounded-pill" id="connectionStatusBadge">Проверяем соединение…</span>
-            </div>
-            <div id="loginAlert" class="alert alert-danger d-none" role="alert"></div>
-            <form id="loginForm" class="needs-validation" novalidate>
-                <div class="mb-3">
-                    <label class="form-label" for="badgeInput">Бэйдж</label>
-                    <input type="text" id="badgeInput" class="form-control form-control-lg" placeholder="Например, 12345"
-                           minlength="3" required autocomplete="off">
-                    <div class="invalid-feedback">Укажите номер бэйджа</div>
-                </div>
-                <div class="mb-3 d-none" id="passwordGroup">
-                    <label class="form-label" for="passwordInput">Пароль администратора</label>
-                    <input type="password" id="passwordInput" class="form-control form-control-lg" placeholder="••••••••">
-                </div>
-                <div class="d-flex align-items-center justify-content-between mb-4">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="remember">
-                        <label class="form-check-label" for="remember">Запомнить устройство</label>
+<div class="row justify-content-center py-4">
+    <div class="col-12">
+        <div class="card login-split-card overflow-hidden" id="loginCard">
+            <div class="row g-0">
+                <div class="col-md-5 login-left-panel d-none d-md-flex">
+                    <div>
+                        <span class="login-badge-admin" style="background: var(--primary);">Рабочее место</span>
+                        <h1 class="h5 fw-bold">Актуализация мест хранения</h1>
+                        <p class="login-desc mb-0">
+                            Приложение для проверки МХ и фиксации результатов инвентаризации.
+                        </p>
+                        <ul class="login-features">
+                            <li><i class="bi bi-check-circle-fill"></i>Сканирование и ввод кода МХ</li>
+                            <li><i class="bi bi-check-circle-fill"></i>Статус совпадения и расхождений</li>
+                            <li><i class="bi bi-check-circle-fill"></i>Фотофиксация и отчёты</li>
+                        </ul>
                     </div>
-                    <a href="#" id="adminToggleLink" class="text-primary small text-decoration-none">Вход для администратора</a>
+                    <p class="login-footer mb-0">Введите бэйдж для начала смены.</p>
                 </div>
-                <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">
-                    Начать смену
-                </button>
-            </form>
-            <p class="small text-muted mt-3 mb-0" id="deviceStatusInfo">Проверяем устройство…</p>
+                <div class="col-md-7 login-right-panel">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h2 class="h5 fw-bold">Вход по бэйджу</h2>
+                            <p class="login-subtitle mb-0">Введите номер пропуска сотрудника</p>
+                        </div>
+                        <span class="badge bg-secondary rounded-pill" id="connectionStatusBadge">Проверяем соединение…</span>
+                    </div>
+                    <div id="loginAlert" class="alert alert-danger d-none" role="alert"></div>
+                    <form id="loginForm" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label class="form-label" for="badgeInput">Бэйдж</label>
+                            <input type="text" id="badgeInput" class="form-control" placeholder="Например, 12345"
+                                   minlength="3" required autocomplete="off">
+                            <div class="invalid-feedback">Укажите номер бэйджа</div>
+                        </div>
+                        <div class="mb-3 d-none" id="passwordGroup">
+                            <label class="form-label" for="passwordInput">Пароль администратора</label>
+                            <div class="input-group">
+                                <input type="password" id="passwordInput" class="form-control" placeholder="••••••••">
+                                <button class="btn btn-outline-secondary" type="button" id="togglePassword" aria-label="Показать пароль">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mb-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="remember">
+                                <label class="form-check-label small" for="remember">Запомнить устройство</label>
+                            </div>
+                            <a href="#" id="adminToggleLink" class="login-back-link" style="margin-top:0">Вход для администратора</a>
+                        </div>
+                        <button type="submit" class="btn btn-login-submit mb-2">
+                            <i class="bi bi-box-arrow-in-right"></i> Начать смену
+                        </button>
+                    </form>
+                    <p class="small text-muted mt-2 mb-0" id="deviceStatusInfo">Проверяем устройство…</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>

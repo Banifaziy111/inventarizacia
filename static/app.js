@@ -322,8 +322,9 @@ function initLoginPage() {
     const deviceStatusInfo = document.getElementById("deviceStatusInfo");
     const loginCard = document.getElementById("loginCard");
     const adminToggleLink = document.getElementById("adminToggleLink");
-    const titleEl = form.closest(".card")?.querySelector("h2");
-    const subtitleEl = form.closest(".card")?.querySelector("p.text-muted");
+    const titleEl = form.closest(".login-split-card")?.querySelector(".login-right-panel h2") || form.closest(".card")?.querySelector("h2");
+    const subtitleEl = form.closest(".login-split-card")?.querySelector(".login-subtitle") || form.closest(".card")?.querySelector("p.text-muted");
+    const togglePasswordBtn = document.getElementById("togglePassword");
 
     const storedBadge = localStorage.getItem("badge");
     if (storedBadge && badgeInput) {
@@ -435,6 +436,13 @@ function initLoginPage() {
                 "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
         }
     }
+
+    togglePasswordBtn?.addEventListener("click", () => {
+        if (!passwordInput) return;
+        passwordInput.type = passwordInput.type === "password" ? "text" : "password";
+        const icon = togglePasswordBtn.querySelector("i");
+        if (icon) icon.className = passwordInput.type === "password" ? "bi bi-eye" : "bi bi-eye-slash";
+    });
 
     adminToggleLink?.addEventListener("click", (event) => {
         event.preventDefault();

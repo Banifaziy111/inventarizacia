@@ -1109,13 +1109,12 @@ def get_place(place_cod):
         place_cod_int = int(place_cod)
         search_by_id = True
     except ValueError:
-        # Если не число, значит это mx_code (например, "Э6.01.01.01")
+        # Если не число, значит это mx_code (например, "Э6.01.01.01" или "Э6.04.20.285.06.03")
         search_by_id = False
         place_cod_str = place_cod.strip().upper()
-        
-        # Проверяем корректность формата mx_code
+        # Кириллица А-Я (U+0410–U+042F), Ё (U+0401), латиница, цифры, точка, дефис
         import re
-        if not re.match(r'^[А-ЯЁA-Z0-9\.]+$', place_cod_str):
+        if not re.match(r'^[\u0410-\u042F\u0401A-Z0-9.\-]+$', place_cod_str):
             return jsonify({'error': 'Некорректный формат кода МХ'}), 400
 
     try:

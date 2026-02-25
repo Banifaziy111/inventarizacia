@@ -3,53 +3,53 @@
 {% block title %}Админ-вход{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-xl-8 col-lg-9">
-        <div class="card overflow-hidden">
+<div class="row justify-content-center py-4">
+    <div class="col-12">
+        <div class="card login-split-card overflow-hidden">
             <div class="row g-0">
-                <div class="col-md-5 d-none d-md-flex flex-column justify-content-between p-4 text-white" style="background: linear-gradient(160deg, #1e293b 0%, #0f172a 100%);">
+                <div class="col-md-5 login-left-panel">
                     <div>
-                        <span class="badge bg-danger rounded-pill mb-3"><i class="bi bi-shield-lock-fill me-1"></i> Admin</span>
-                        <h1 class="h5 fw-bold mb-2">Центр управления инвентаризацией</h1>
-                        <p class="text-white-50 small mb-4">
+                        <span class="login-badge-admin">Admin</span>
+                        <h1 class="h5 fw-bold">Центр управления инвентаризацией</h1>
+                        <p class="login-desc mb-0">
                             Отслеживайте ход инвентаризации, контролируйте проблемные МХ и качество работы сотрудников.
                         </p>
-                        <ul class="list-unstyled small mb-0">
-                            <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>Живая статистика по складу</li>
-                            <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>Фотофиксации и проблемные МХ</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Тикеты сотрудников и ревизии</li>
+                        <ul class="login-features">
+                            <li><i class="bi bi-check-circle-fill"></i>Живая статистика по складу</li>
+                            <li><i class="bi bi-check-circle-fill"></i>Фотофиксации и проблемные МХ</li>
+                            <li><i class="bi bi-check-circle-fill"></i>Тикеты сотрудников и ревизии</li>
                         </ul>
                     </div>
-                    <p class="small text-white-50 mb-0">Доступ только для авторизованных администраторов.</p>
+                    <p class="login-footer mb-0">Доступ только для авторизованных администраторов.</p>
                 </div>
-                <div class="col-md-7">
-                    <div class="p-4 p-lg-5">
-                        <h2 class="h5 fw-bold mb-1">Вход в панель администратора</h2>
-                        <p class="text-muted small mb-4">Введите пароль для доступа к дашборду и отчётам</p>
-                        <div id="adminLoginAlert" class="alert alert-danger d-none" role="alert"></div>
-                        <form id="adminLoginForm" class="needs-validation" novalidate>
-                            <div class="mb-3">
-                                <label class="form-label" for="adminBadgeInput">Бэйдж</label>
-                                <input type="text" class="form-control" id="adminBadgeInput" value="ADMIN" placeholder="ADMIN" readonly>
+                <div class="col-md-7 login-right-panel">
+                    <h2 class="h5 fw-bold">Вход в панель администратора</h2>
+                    <p class="login-subtitle mb-0">Введите пароль для доступа к дашборду и отчётам</p>
+                    <div id="adminLoginAlert" class="alert alert-danger d-none" role="alert"></div>
+                    <form id="adminLoginForm" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label class="form-label" for="adminBadgeInput">Бэйдж</label>
+                            <input type="text" class="form-control" id="adminBadgeInput" value="ADMIN" placeholder="ADMIN" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="adminPasswordInput">Пароль</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="adminPasswordInput" placeholder="Введите админ-пароль" required>
+                                <button class="btn btn-outline-secondary" type="button" id="toggleAdminPassword" aria-label="Показать пароль">
+                                    <i class="bi bi-eye" id="toggleAdminPasswordIcon"></i>
+                                </button>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label" for="adminPasswordInput">Пароль</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="adminPasswordInput" placeholder="Введите админ-пароль" required>
-                                    <button class="btn btn-outline-secondary" type="button" id="toggleAdminPassword"><i class="bi bi-eye"></i></button>
-                                </div>
-                                <p class="small text-muted mt-1 mb-0">Выдаётся ответственным за систему</p>
-                            </div>
-                            <div class="form-check mb-4">
-                                <input class="form-check-input" type="checkbox" id="rememberAdmin">
-                                <label class="form-check-label small" for="rememberAdmin">Доверенное устройство — оставаться в системе 8 часов</label>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100 mb-2 fw-semibold">
-                                <i class="bi bi-box-arrow-in-right me-1"></i> Войти в панель
-                            </button>
-                            <a href="/" class="d-block text-center link-secondary small text-decoration-none">← Вернуться к рабочей форме</a>
-                        </form>
-                    </div>
+                            <p class="small text-muted mt-1 mb-0">Выдаётся ответственным за систему</p>
+                        </div>
+                        <div class="form-check mb-4">
+                            <input class="form-check-input" type="checkbox" id="rememberAdmin">
+                            <label class="form-check-label small" for="rememberAdmin">Доверенное устройство — оставаться в системе 8 часов</label>
+                        </div>
+                        <button type="submit" class="btn btn-login-submit mb-2">
+                            <i class="bi bi-arrow-right"></i> Войти в панель
+                        </button>
+                        <a href="/" class="login-back-link">← Вернуться к рабочей форме</a>
+                    </form>
                 </div>
             </div>
         </div>

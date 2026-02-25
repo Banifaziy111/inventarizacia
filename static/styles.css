@@ -432,7 +432,123 @@ body[data-theme="dark"] .theme-toggle-thumb {
     transition: opacity 0.4s, transform 0.4s;
 }
 
-/* ========== LOGIN / GLASS ========== */
+/* ========== LOGIN — единая форма входа (две колонки) ========== */
+.login-split-card {
+    border: none;
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.login-split-card .login-left-panel {
+    background: linear-gradient(160deg, #1e3a5f 0%, #0f172a 100%);
+    color: #fff;
+    padding: 2rem 1.75rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.login-split-card .login-left-panel .login-badge-admin {
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.35rem 0.65rem;
+    border-radius: 0.5rem;
+    display: inline-block;
+    margin-bottom: 1rem;
+}
+
+.login-split-card .login-left-panel h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.login-split-card .login-left-panel .login-desc {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.875rem;
+    margin-bottom: 1.25rem;
+}
+
+.login-split-card .login-left-panel .login-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem 0;
+}
+
+.login-split-card .login-left-panel .login-features li {
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.login-split-card .login-left-panel .login-features li i {
+    color: var(--success);
+    flex-shrink: 0;
+}
+
+.login-split-card .login-left-panel .login-footer {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+    margin-top: auto;
+}
+
+.login-split-card .login-right-panel {
+    background: var(--bg-surface);
+    padding: 2rem 1.75rem;
+}
+
+.login-split-card .login-right-panel h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.login-split-card .login-right-panel .login-subtitle {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin-bottom: 1.5rem;
+}
+
+.login-split-card .btn-login-submit {
+    background: var(--gradient-primary);
+    border: none;
+    color: #fff;
+    font-weight: 600;
+    padding: 0.65rem 1.25rem;
+    border-radius: var(--radius);
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.login-split-card .btn-login-submit:hover {
+    color: #fff;
+    opacity: 0.95;
+    filter: brightness(1.05);
+}
+
+.login-split-card .login-back-link {
+    display: block;
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.login-split-card .login-back-link:hover {
+    color: var(--primary);
+}
+
 #loginCard {
     min-height: 340px;
 }
