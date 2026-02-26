@@ -445,10 +445,46 @@ body[data-theme="dark"] .theme-toggle-thumb {
 .login-split-card .login-left-panel {
     background: linear-gradient(160deg, #1e3a5f 0%, #0f172a 100%);
     color: #fff;
-    padding: 2rem 1.75rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: stretch;
+    min-height: 340px;
+}
+
+/* Flip-карточка: две стороны (рабочее место / админ) */
+.login-flip-wrapper {
+    flex: 1;
+    min-height: 340px;
+    perspective: 1200px;
+    position: relative;
+}
+
+.login-flip-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 340px;
+    transform-style: preserve-3d;
+    transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.login-left-panel.flipped .login-flip-inner {
+    transform: rotateY(-180deg);
+}
+
+.login-flip-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    padding: 2rem 1.75rem;
+}
+
+.login-flip-back {
+    transform: rotateY(180deg);
 }
 
 .login-split-card .login-left-panel .login-badge-admin {
@@ -833,6 +869,74 @@ body.scan-only-mode .scan-only-only {
 .admin-kpi-card .card-body { padding: 0.75rem 1rem; }
 .admin-kpi-icon { width: 2.5rem; height: 2.5rem; display: flex; align-items: center; justify-content: center; }
 .list-group-sm .list-group-item { padding: 0.35rem 1rem; font-size: 0.875rem; }
+
+/* ========== ПОЛИРОВКА: фокус, карточки, блоки ========== */
+.btn:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible,
+.form-check-input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+}
+
+.scan-hero.card:hover {
+    box-shadow: 0 4px 16px rgba(110, 43, 98, 0.12);
+}
+
+.place-card-mx .info-block {
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.place-card-mx .info-block:not(.place-value-empty) {
+    background: var(--bg-page);
+}
+
+.place-card-mx .info-block .fw-semibold:not(.place-value-empty) {
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.alert-success {
+    border-radius: var(--radius);
+    border-left: 4px solid var(--success);
+    box-shadow: 0 1px 3px rgba(5, 150, 105, 0.15);
+}
+
+.toast.bg-success,
+.toast.text-bg-success {
+    border-left: 4px solid var(--success);
+}
+
+@keyframes scanHeroEnter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.scan-hero {
+    animation: scanHeroEnter 0.35s ease-out;
+}
+
+.btn-primary:active,
+.btn-login-submit:active {
+    transform: scale(0.98);
+}
+
+.btn-outline-primary:hover,
+.btn-outline-secondary:hover {
+    transform: translateY(-1px);
+}
+
+.route-node,
+.place-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
 
 /* ========== RESPONSIVE ========== */
 @media (max-width: 576px) {

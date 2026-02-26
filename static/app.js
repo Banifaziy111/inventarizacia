@@ -6,7 +6,6 @@ const ANIMATE_SELECTORS = [
     ".photo-card",
     ".notification-panel",
     ".admin-activity-item",
-    ".stats-progress > *",
 ];
 let animationObserver = null;
 
@@ -321,6 +320,7 @@ function initLoginPage() {
     const connectionBadge = document.getElementById("connectionStatusBadge");
     const deviceStatusInfo = document.getElementById("deviceStatusInfo");
     const loginCard = document.getElementById("loginCard");
+    const loginLeftPanel = document.getElementById("loginLeftPanel");
     const adminToggleLink = document.getElementById("adminToggleLink");
     const titleEl = form.closest(".login-split-card")?.querySelector(".login-right-panel h2") || form.closest(".card")?.querySelector("h2");
     const subtitleEl = form.closest(".login-split-card")?.querySelector(".login-subtitle") || form.closest(".card")?.querySelector("p.text-muted");
@@ -357,6 +357,7 @@ function initLoginPage() {
         if (adminToggleLink) {
             adminToggleLink.textContent = "← Назад к рабочему входу";
         }
+        loginLeftPanel?.classList.add("flipped");
 
         if (deviceStatusInfo) {
             deviceStatusInfo.textContent = "Доступ к камере настраивается уже внутри админ-панели.";
@@ -382,6 +383,7 @@ function initLoginPage() {
         if (adminToggleLink) {
             adminToggleLink.textContent = "Вход для администратора";
         }
+        loginLeftPanel?.classList.remove("flipped");
 
         if (deviceStatusInfo) {
             const cameraOk = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -512,14 +514,8 @@ function initWorkPage() {
 
     const badgeLabel = document.getElementById("currentBadge");
     const lastSyncLabel = document.getElementById("lastSyncLabel");
-    const todayLabel = document.getElementById("todayStatsLabel");
-    const totalScans = document.getElementById("totalScans");
-    const totalDiscrepancy = document.getElementById("totalDiscrepancy");
-    const totalOk = document.getElementById("totalOk");
-    const sessionsTableBody = document.getElementById("sessionsTableBody");
     const newShiftBtn = document.getElementById("newShiftBtn");
     const newShiftBtnScanOnly = document.getElementById("newShiftBtnScanOnly");
-    const refreshStatsBtn = document.getElementById("refreshStatsBtn");
     const placeForm = document.getElementById("scanForm");
     const placeInput = document.getElementById("placeInput");
     const placeAlert = document.getElementById("placeAlert");
@@ -527,8 +523,6 @@ function initWorkPage() {
     const placeUpdatedLabel = document.getElementById("placeUpdatedLabel");
     const clearPlaceBtn = document.getElementById("clearPlaceBtn");
     const refreshPlaceBtn = document.getElementById("refreshPlaceBtn");
-    const lastPlacesGrid = document.getElementById("lastPlacesGrid");
-    const lastPlacesCount = document.getElementById("lastPlacesCount");
     const statusButtonsContainer = document.getElementById("statusButtons");
     const statusLabel = document.getElementById("statusLabel");
     const commentInput = document.getElementById("commentInput");
@@ -557,20 +551,11 @@ function initWorkPage() {
     const notificationList = document.getElementById("notificationList");
     const clearLogBtn = document.getElementById("clearLogBtn");
     const fabScanBtn = document.getElementById("fabScanBtn");
-    const progressCompletionValue = document.getElementById("progressCompletionValue");
-    const progressCompletionBar = document.getElementById("progressCompletionBar");
-    const progressAccuracyValue = document.getElementById("progressAccuracyValue");
-    const progressAccuracyBar = document.getElementById("progressAccuracyBar");
-    const progressPhotoValue = document.getElementById("progressPhotoValue");
-    const progressPhotoBar = document.getElementById("progressPhotoBar");
     const routeSuggestionsEl = document.getElementById("routeSuggestions");
     const routeMapEl = document.getElementById("routeMap");
     const refreshRouteBtn = document.getElementById("refreshRouteBtn");
     const routeFilterSelect = document.getElementById("routeFilterSelect");
     const quickScanModeCheck = document.getElementById("quickScanMode");
-    const voiceSearchBtn = document.getElementById("voiceSearchBtn");
-    const incidentForm = document.getElementById("incidentForm");
-    const incidentStatus = document.getElementById("incidentStatus");
     const historyFromInput = document.getElementById("historyFrom");
     const historyToInput = document.getElementById("historyTo");
     const historyReloadBtn = document.getElementById("historyReloadBtn");
@@ -777,6 +762,8 @@ function initWorkPage() {
     }
 
     function renderLastPlaces() {
+        const lastPlacesGrid = document.getElementById("lastPlacesGrid");
+        const lastPlacesCount = document.getElementById("lastPlacesCount");
         if (!lastPlacesGrid) return;
         if (!state.lastPlaces.length) {
             lastPlacesGrid.innerHTML = '<div class="empty-state">Нет сканирований</div>';
@@ -907,108 +894,6 @@ function initWorkPage() {
             });
         });
         refreshAnimations();
-    }
-
-    async function loadStats() {
-        const shiftStart = (typeof sessionStorage !== "undefined" && sessionStorage.getItem(SHIFT_START_KEY)) || "";
-        const url = shiftStart ? `/api/user/stats/${encodeURIComponent(badge)}?since=${shiftStart}` : `/api/user/stats/${encodeURIComponent(badge)}`;
-        const { ok, data } = await API.get(url);
-        if (!ok || data.error) {
-            showAlert(placeAlert, data.error || "Не удалось загрузить статистику");
-            return;
-        }
-
-        hideAlert(placeAlert);
-        const overall = data.overall || {};
-        const today = data.today || {};
-        const sessions = data.sessions || [];
-
-        totalScans.textContent = overall.total_scanned ?? 0;
-        totalDiscrepancy.textContent = overall.with_discrepancy ?? 0;
-        totalOk.textContent = overall.no_discrepancy ?? 0;
-        todayLabel.textContent = `Сегодня: ${today.today_scanned ?? 0} сканов, расхождений ${today.today_discrepancy ?? 0}`;
-        lastSyncLabel.textContent = `Последняя синхронизация: ${formatDate(new Date())}`;
-
-        if (Array.isArray(data.last_places)) {
-            state.lastPlaces = data.last_places;
-            data.last_places.forEach((p) => {
-                const k = (p.place_name || p.place_cod || "").toString().trim().toUpperCase();
-                if (k) state.scannedPlaceCodes.add(k);
-            });
-            renderLastPlaces();
-        }
-
-        sessionsTableBody.innerHTML = sessions.length
-            ? sessions
-                  .map(
-                      (session) => `
-                <tr>
-                    <td>${session.session_id}</td>
-                    <td>${formatDate(session.login_time)}</td>
-                    <td>${formatDate(session.logout_time)}</td>
-                    <td class="text-center">${session.total_scanned ?? 0}</td>
-                    <td class="text-center">${session.with_discrepancy ?? 0}</td>
-                    <td class="text-center">${session.is_active ? '<span class="badge text-bg-success">Активна</span>' : '<span class="badge text-bg-secondary">Закрыта</span>'}</td>
-                </tr>`
-                  )
-                  .join("")
-            : `
-                <tr>
-                    <td colspan="6" class="text-center text-muted py-4">Нет данных</td>
-                </tr>`;
-
-        updateProgress(overall, today);
-        refreshAnimations();
-        loadUserDailyChart();
-    }
-
-    let userDailyChart = null;
-    function loadUserDailyChart() {
-        const canvas = document.getElementById("userDailyChart");
-        if (!canvas || typeof Chart === "undefined") return;
-        API.get(`/api/user/daily-stats/${badge}`).then(({ ok, data }) => {
-            if (!ok || data.error) return;
-            const daily = data.daily || [];
-            const labels = daily.map((d) => d.date?.slice(5) || "");
-            const totals = daily.map((d) => d.total || 0);
-            const errors = daily.map((d) => d.errors || 0);
-            const okData = daily.map((d) => d.ok || 0);
-            if (userDailyChart) userDailyChart.destroy();
-            const ctx = canvas.getContext("2d");
-            userDailyChart = new Chart(ctx, {
-                type: "bar",
-                data: {
-                    labels,
-                    datasets: [
-                        { label: "Всего", data: totals, backgroundColor: "rgba(110, 43, 98, 0.6)" },
-                        { label: "Без расх.", data: okData, backgroundColor: "rgba(5, 150, 105, 0.6)" },
-                        { label: "Расхожд.", data: errors, backgroundColor: "rgba(220, 38, 38, 0.6)" },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    scales: { x: { stacked: false }, y: { beginAtZero: true } },
-                    plugins: { legend: { position: "bottom" } },
-                },
-            });
-        });
-    }
-
-    function updateProgress(overall, today) {
-        const plan = 120;
-        const completion = Math.min(100, Math.round(((today?.today_scanned || 0) / plan) * 100));
-        const total = overall?.total_scanned || 0;
-        const accurate = total ? Math.round(((overall?.no_discrepancy || 0) / total) * 100) : 100;
-        const photoPercent = state.savedCount
-            ? Math.min(100, Math.round((state.photoUploads / state.savedCount) * 100))
-            : 0;
-
-        if (progressCompletionValue) progressCompletionValue.textContent = `${completion}%`;
-        if (progressCompletionBar) progressCompletionBar.style.width = `${completion}%`;
-        if (progressAccuracyValue) progressAccuracyValue.textContent = `${accurate}%`;
-        if (progressAccuracyBar) progressAccuracyBar.style.width = `${accurate}%`;
-        if (progressPhotoValue) progressPhotoValue.textContent = `${photoPercent}%`;
-        if (progressPhotoBar) progressPhotoBar.style.width = `${photoPercent}%`;
     }
 
     async function loadHistory() {
@@ -1368,7 +1253,6 @@ function initWorkPage() {
                     ? state.suggestions.find((s) => !state.scannedPlaceCodes.has((s.mx_code || "").toString().trim().toUpperCase()))?.mx_code
                     : null;
                 clearPlaceCard();
-                loadStats();
                 loadRouteSuggestions();
                 if (nextMx && placeInput) {
                     placeInput.value = nextMx;
@@ -1386,8 +1270,6 @@ function initWorkPage() {
         if (result) {
             const placeKey = (result.place_name || result.place_cod || "").toString().trim().toUpperCase();
             if (placeKey) state.scannedPlaceCodes.add(placeKey);
-            state.lastPlaces = [result, ...state.lastPlaces].slice(0, 5);
-            renderLastPlaces();
         }
         state.savedCount += 1;
         if (state.photoData) {
@@ -1399,7 +1281,6 @@ function initWorkPage() {
             ? state.suggestions.find((s) => !state.scannedPlaceCodes.has((s.mx_code || "").toString().trim().toUpperCase()))?.mx_code
             : null;
         clearPlaceCard();
-        loadStats();
         loadRouteSuggestions();
         if (nextMx && placeInput) {
             placeInput.value = nextMx;
@@ -1651,20 +1532,14 @@ function initWorkPage() {
         try {
             sessionStorage.setItem(SHIFT_START_KEY, String(Date.now()));
         } catch (e) {}
-        state.lastPlaces = [];
         state.scannedPlaceCodes.clear();
         clearPlaceCard();
-        loadStats();
-        showAlert(placeAlert, "Новая смена начата. Статистика и отчёты считаются с этого момента.", "info");
+        showAlert(placeAlert, "Новая смена начата. Отчёты считаются с этого момента.", "info");
         logEvent("Начата новая смена", "info");
     }
     newShiftBtn?.addEventListener("click", startNewShift);
     newShiftBtnScanOnly?.addEventListener("click", startNewShift);
 
-    refreshStatsBtn?.addEventListener("click", () => {
-        loadStats();
-        logEvent("Статистика обновлена", "info");
-    });
     refreshRouteBtn?.addEventListener("click", () => {
         loadRouteSuggestions();
         logEvent("Маршрут обновлён", "info");
@@ -1675,32 +1550,6 @@ function initWorkPage() {
     });
     quickScanModeCheck?.addEventListener("change", () => {
         state.quickScanMode = !!quickScanModeCheck?.checked;
-    });
-    voiceSearchBtn?.addEventListener("click", async () => {
-        if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-            showAlert(placeAlert, "Голосовой ввод не поддерживается в этом браузере", "warning");
-            return;
-        }
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const rec = new SpeechRecognition();
-        rec.lang = "ru-RU";
-        rec.continuous = false;
-        rec.interimResults = false;
-        voiceSearchBtn.classList.add("disabled");
-        rec.onresult = (e) => {
-            let t = (e.results[0]?.[0]?.transcript || "").trim();
-            t = t.replace(/\s+точка\s+/gi, ".").replace(/\s+/g, ".");
-            const code = t.replace(/[^А-ЯЁA-Z0-9\.]/gi, "").toUpperCase();
-            if (code && placeInput) {
-                placeInput.value = code;
-                placeInput.classList.add("is-valid");
-                loadPlace(code);
-                logEvent(`Голос: ${code}`, "info");
-            }
-            voiceSearchBtn.classList.remove("disabled");
-        };
-        rec.onerror = rec.onend = () => voiceSearchBtn.classList.remove("disabled");
-        rec.start();
     });
     refreshPlaceBtn?.addEventListener("click", () => {
         if (state.lastMxCode) {
@@ -1789,31 +1638,6 @@ function initWorkPage() {
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;
         setTorch(!qrTorchOn);
-    });
-    incidentForm?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const formData = new FormData(incidentForm);
-        const payload = {
-            badge,
-            place_cod: formData.get("ticketPlace") || state.lastMxCode,
-            priority: formData.get("ticketPriority") || "medium",
-            description: formData.get("ticketDescription"),
-        };
-        if (!payload.description) {
-            incidentStatus.textContent = "Опишите проблему";
-            return;
-        }
-        incidentStatus.textContent = "Отправка...";
-        const { ok, data } = await API.post("/api/tickets", payload);
-        if (!ok || data.error || !data.success) {
-            incidentStatus.textContent = data?.error || "Ошибка отправки";
-            logEvent(incidentStatus.textContent, "danger");
-            return;
-        }
-        incidentStatus.textContent = "Отправлено!";
-        incidentForm.reset();
-        logEvent("Создан тикет на инцидент", "warning");
-        setTimeout(() => (incidentStatus.textContent = ""), 4000);
     });
 
     placeInput?.addEventListener("paste", (event) => {
@@ -1945,7 +1769,6 @@ function initWorkPage() {
 
     applyScanOnlyMode();
     setTodayDates();
-    loadStats();
     loadRouteSuggestions();
     renderLastPlaces();
     updateStatusLabel();

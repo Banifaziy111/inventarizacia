@@ -19,10 +19,9 @@
                 <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
             </div>
             <div class="full-mode-only d-flex gap-2">
-                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Начать новую смену — статистика и отчёты с нуля">
+                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Начать новую смену — отчёты с нуля">
                     <i class="bi bi-clock-history me-1"></i>Новая смена
                 </button>
-                <button class="btn btn-outline-secondary btn-sm" id="refreshStatsBtn">Статистика</button>
                 <button class="btn btn-outline-secondary btn-sm" id="refreshPlaceBtn">Обновить карточку</button>
             </div>
         </div>
@@ -47,9 +46,6 @@
                         <button type="button" class="btn btn-outline-secondary" id="clearPlaceBtn">Очистить</button>
                         <button type="button" class="btn btn-outline-primary btn-qr" id="openQrScannerBtn">
                             <i class="bi bi-qr-code me-1"></i>QR
-                        </button>
-                        <button type="button" class="btn btn-outline-info" id="voiceSearchBtn" title="Голосовой ввод">
-                            <i class="bi bi-mic"></i>
                         </button>
                     </div>
                     <p class="form-text small mt-2 mb-0">Сканер, камера или ввод вручную</p>
@@ -104,42 +100,6 @@
                 <button type="button" class="btn btn-outline-primary btn-sm" id="newShiftBtnScanOnly" title="Начать новую смену">
                     <i class="bi bi-clock-history me-1"></i>Новая смена
                 </button>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="row g-3 mb-4 full-mode-only">
-    <div class="col-md-4">
-        <div class="card h-100 progress-card">
-            <div class="card-body">
-                <p class="small text-muted mb-1"><i class="bi bi-pie-chart me-1 opacity-75"></i>Выполнение</p>
-                <span class="fs-4 fw-bold" id="progressCompletionValue">0%</span>
-                <div class="progress mt-1" style="height:6px">
-                    <div class="progress-bar" id="progressCompletionBar" style="width:0%"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card h-100 progress-card">
-            <div class="card-body">
-                <p class="small text-muted mb-1"><i class="bi bi-bullseye me-1 opacity-75"></i>Точность</p>
-                <span class="fs-4 fw-bold text-success" id="progressAccuracyValue">0%</span>
-                <div class="progress mt-1 bg-success bg-opacity-25" style="height:6px">
-                    <div class="progress-bar bg-success" id="progressAccuracyBar" style="width:0%"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card h-100 progress-card">
-            <div class="card-body">
-                <p class="small text-muted mb-1"><i class="bi bi-camera me-1 opacity-75"></i>Фото</p>
-                <span class="fs-4 fw-bold text-info" id="progressPhotoValue">0%</span>
-                <div class="progress mt-1 bg-info bg-opacity-25" style="height:6px">
-                    <div class="progress-bar bg-info" id="progressPhotoBar" style="width:0%"></div>
-                </div>
             </div>
         </div>
     </div>
@@ -207,99 +167,6 @@
                 </button>
                 <p class="small text-muted mt-2 mb-0">Карточка очистится после сохранения</p>
             </div>
-        </div>
-    </div>
-</section>
-
-<section class="card mb-4 full-mode-only">
-    <div class="card-body">
-        <h3 class="h6 mb-2 section-title"><i class="bi bi-bar-chart"></i>Динамика за 7 дней</h3>
-        <canvas id="userDailyChart" height="120"></canvas>
-    </div>
-</section>
-
-<section class="row g-4 mb-4 full-mode-only">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-body">
-                <h3 class="h6 mb-2 section-title"><i class="bi bi-graph-up"></i>Статус смены</h3>
-                <p class="small text-muted mb-2" id="todayStatsLabel">—</p>
-                <div class="row g-2">
-                    <div class="col-4">
-                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
-                            <div class="h5 mb-0" id="totalScans">0</div>
-                            <small class="text-muted">сканов</small>
-                        </div>
-                    </div>
-                    <div class="col-4">
-                        <div class="p-2 bg-warning bg-opacity-10 rounded text-center">
-                            <div class="h5 mb-0" id="totalDiscrepancy">0</div>
-                            <small class="text-muted">расхожд.</small>
-                        </div>
-                    </div>
-                    <div class="col-4">
-                        <div class="p-2 bg-info bg-opacity-10 rounded text-center">
-                            <div class="h5 mb-0" id="totalOk">0</div>
-                            <small class="text-muted">без расх.</small>
-                        </div>
-                    </div>
-                </div>
-                <span class="badge bg-success rounded-pill mt-2" id="onlineBadge">Онлайн</span>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h3 class="h6 mb-0 section-title"><i class="bi bi-clock-history"></i>Последние сканы</h3>
-                    <span class="badge bg-secondary" id="lastPlacesCount">0</span>
-                </div>
-                <div class="last-places-grid" id="lastPlacesGrid">
-                    <p class="text-muted small text-center py-4 mb-0">Нет данных</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="card mb-4 full-mode-only">
-    <div class="card-body">
-        <h3 class="h6 mb-3">Сообщить о проблеме</h3>
-        <form id="incidentForm" class="row g-2">
-            <div class="col-md-3">
-                <input type="text" class="form-control form-control-sm" name="ticketPlace" placeholder="Код МХ">
-            </div>
-            <div class="col-md-3">
-                <select class="form-select form-select-sm" name="ticketPriority">
-                    <option value="low">Низкий</option>
-                    <option value="medium" selected>Средний</option>
-                    <option value="high">Высокий</option>
-                </select>
-            </div>
-            <div class="col-12">
-                <textarea class="form-control form-control-sm" name="ticketDescription" rows="2" placeholder="Описание"></textarea>
-            </div>
-            <div class="col-12">
-                <button type="submit" class="btn btn-primary btn-sm">Отправить</button>
-                <span class="small text-muted ms-2" id="incidentStatus"></span>
-            </div>
-        </form>
-    </div>
-</section>
-
-<section class="card mb-4 full-mode-only">
-    <div class="card-body">
-        <h3 class="h6 mb-2">Сессии</h3>
-        <div class="table-responsive">
-            <table class="table table-sm table-hover">
-                <thead>
-                <tr><th>ID</th><th>Начало</th><th>Конец</th><th class="text-center">Сканов</th><th class="text-center">Расх.</th><th>Статус</th></tr>
-                </thead>
-                <tbody id="sessionsTableBody">
-                <tr><td colspan="6" class="text-center text-muted py-3">Нет данных</td></tr>
-                </tbody>
-            </table>
         </div>
     </div>
 </section>

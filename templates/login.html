@@ -7,20 +7,41 @@
     <div class="col-12">
         <div class="card login-split-card overflow-hidden" id="loginCard">
             <div class="row g-0">
-                <div class="col-md-5 login-left-panel d-none d-md-flex">
-                    <div>
-                        <span class="login-badge-admin" style="background: var(--primary);">Рабочее место</span>
-                        <h1 class="h5 fw-bold">Актуализация мест хранения</h1>
-                        <p class="login-desc mb-0">
-                            Приложение для проверки МХ и фиксации результатов инвентаризации.
-                        </p>
-                        <ul class="login-features">
-                            <li><i class="bi bi-check-circle-fill"></i>Сканирование и ввод кода МХ</li>
-                            <li><i class="bi bi-check-circle-fill"></i>Статус совпадения и расхождений</li>
-                            <li><i class="bi bi-check-circle-fill"></i>Фотофиксация и отчёты</li>
-                        </ul>
+                <div class="col-md-5 login-left-panel d-none d-md-flex" id="loginLeftPanel">
+                    <div class="login-flip-wrapper">
+                        <div class="login-flip-inner">
+                            <div class="login-flip-front login-flip-face">
+                                <div>
+                                    <span class="login-badge-admin" style="background: var(--primary);">Рабочее место</span>
+                                    <h1 class="h5 fw-bold">Актуализация мест хранения</h1>
+                                    <p class="login-desc mb-0">
+                                        Приложение для проверки МХ и фиксации результатов инвентаризации.
+                                    </p>
+                                    <ul class="login-features">
+                                        <li><i class="bi bi-check-circle-fill"></i>Сканирование и ввод кода МХ</li>
+                                        <li><i class="bi bi-check-circle-fill"></i>Статус совпадения и расхождений</li>
+                                        <li><i class="bi bi-check-circle-fill"></i>Фотофиксация и отчёты</li>
+                                    </ul>
+                                </div>
+                                <p class="login-footer mb-0">Введите бэйдж для начала смены.</p>
+                            </div>
+                            <div class="login-flip-back login-flip-face">
+                                <div>
+                                    <span class="login-badge-admin">Admin</span>
+                                    <h1 class="h5 fw-bold">Центр управления инвентаризацией</h1>
+                                    <p class="login-desc mb-0">
+                                        Отслеживайте ход инвентаризации, контролируйте проблемные МХ и качество работы сотрудников.
+                                    </p>
+                                    <ul class="login-features">
+                                        <li><i class="bi bi-check-circle-fill"></i>Живая статистика по складу</li>
+                                        <li><i class="bi bi-check-circle-fill"></i>Фотофиксации и проблемные МХ</li>
+                                        <li><i class="bi bi-check-circle-fill"></i>Тикеты сотрудников и ревизии</li>
+                                    </ul>
+                                </div>
+                                <p class="login-footer mb-0">Доступ только для авторизованных администраторов.</p>
+                            </div>
+                        </div>
                     </div>
-                    <p class="login-footer mb-0">Введите бэйдж для начала смены.</p>
                 </div>
                 <div class="col-md-7 login-right-panel">
                     <div class="d-flex justify-content-between align-items-start mb-2">
