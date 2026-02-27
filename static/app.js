@@ -939,6 +939,22 @@ function initWorkPage() {
 
     function applyPlaceData(data, placeCod, fromCache = false) {
         placeTitle.textContent = data.place_name ?? placeCod;
+        const placeAdminStatusBadge = document.getElementById("placeAdminStatusBadge");
+        if (placeAdminStatusBadge) {
+            const s = data.admin_status;
+            if (s === "in_work") {
+                placeAdminStatusBadge.textContent = "В работе";
+                placeAdminStatusBadge.className = "badge bg-warning text-dark";
+                placeAdminStatusBadge.classList.remove("d-none");
+            } else if (s === "repaired") {
+                placeAdminStatusBadge.textContent = "Исправлено";
+                placeAdminStatusBadge.className = "badge bg-success";
+                placeAdminStatusBadge.classList.remove("d-none");
+            } else {
+                placeAdminStatusBadge.classList.add("d-none");
+                placeAdminStatusBadge.textContent = "";
+            }
+        }
         const mxFloor = document.getElementById("mxFloor");
         const mxRow = document.getElementById("mxRow");
         const mxSection = document.getElementById("mxSection");
@@ -997,6 +1013,11 @@ function initWorkPage() {
 
     function clearPlaceCard() {
         placeTitle.textContent = "—";
+        const placeAdminStatusBadge = document.getElementById("placeAdminStatusBadge");
+        if (placeAdminStatusBadge) {
+            placeAdminStatusBadge.classList.add("d-none");
+            placeAdminStatusBadge.textContent = "";
+        }
         const mxFloor = document.getElementById("mxFloor");
         const mxRow = document.getElementById("mxRow");
         const mxSection = document.getElementById("mxSection");
@@ -1860,12 +1881,6 @@ function initAdminDashboard() {
     const extendTaskButtons = document.getElementById("activeTasksTableBody");
     const reportsTableBody = document.getElementById("reportsTableBody");
     const reportsModalEl = document.getElementById("reportsModal");
-    const whIdExportSelect = document.getElementById("whIdExportSelect");
-    const exportBlockBtn = document.getElementById("exportBlockBtn");
-    const blockExportStatus = document.getElementById("blockExportStatus");
-    const blockRepairedSection = document.getElementById("blockRepairedSection");
-    const blockPlacesBody = document.getElementById("blockPlacesBody");
-    const blockPlacesCount = document.getElementById("blockPlacesCount");
     const photoPreviewModalEl = document.getElementById("photoPreviewModal");
     const photoPreviewImg = document.getElementById("photoPreviewImg");
     const photoPreviewMeta = document.getElementById("photoPreviewMeta");
@@ -1881,6 +1896,9 @@ function initAdminDashboard() {
     const scrollToTicketsBtn = document.getElementById("scrollToTickets");
     const problemZonesBlock = document.getElementById("problemZonesBlock");
     const ticketsBlock = document.getElementById("ticketsBlock");
+    const dashboardBlockErrorsSelect = document.getElementById("dashboardBlockErrorsSelect");
+    const dashboardBlockErrorsBody = document.getElementById("dashboardBlockErrorsBody");
+    const dashboardBlockErrorsCount = document.getElementById("dashboardBlockErrorsCount");
     const adminStatusBar = document.getElementById("adminStatusBar");
     const adminStatusBarText = document.getElementById("adminStatusBarText");
     const adminStatusChipAccuracy = document.getElementById("adminStatusChipAccuracy");
@@ -1956,7 +1974,7 @@ function initAdminDashboard() {
             discrepancyTypes,
             (item) => `
                 <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span>${item.status || "—"}</span>
+                    <span>${item.label || item.status || "—"}</span>
                     <span class="badge text-bg-danger">${item.count}</span>
                 </div>`
         );
@@ -1976,10 +1994,11 @@ function initAdminDashboard() {
         renderDailyChart(dailyStats);
         renderStatusChart(dailyStats);
 
-        problemZonesTableBody.innerHTML = problemZones.length
-            ? problemZones
-                  .map(
-                      (zone) => `
+        if (problemZonesTableBody) {
+            problemZonesTableBody.innerHTML = problemZones.length
+                ? problemZones
+                      .map(
+                          (zone) => `
                 <tr data-place-cod="${zone.place_cod || ""}">
                     <td class="text-primary text-decoration-underline" style="cursor:pointer;">
                         ${zone.place_name || zone.place_cod || "—"}
@@ -1987,9 +2006,10 @@ function initAdminDashboard() {
                     <td class="text-center">${zone.scan_count}</td>
                     <td class="text-center text-danger">${zone.error_count} (${zone.error_rate}%)</td>
                 </tr>`
-                  )
-                  .join("")
-            : `<tr><td colspan="3" class="text-center text-muted py-3">Нет данных</td></tr>`;
+                      )
+                      .join("")
+                : `<tr><td colspan="3" class="text-center text-muted py-3">Нет данных</td></tr>`;
+        }
     }
 
     let currentPhotoContext = {
@@ -2075,6 +2095,7 @@ function initAdminDashboard() {
     }
 
     async function loadActiveTasks() {
+        if (!activeTasksTableBody) return;
         const { ok, data } = await API.get("/api/tasks/active");
         if (!ok || data.error) {
             activeTasksTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${data.error || "Ошибка загрузки"}</td></tr>`;
@@ -2148,15 +2169,16 @@ function initAdminDashboard() {
     }
 
     async function loadQualityData() {
+        if (!qualityTableBody && !qualityReviewList) return;
         const { ok, data } = await API.get("/api/admin/reviews");
         if (!ok || data.error) {
-            qualityTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">${data?.error || "Ошибка загрузки"}</td></tr>`;
-            qualityReviewList.innerHTML = '<div class="list-group-item text-muted">Ревизии не назначены</div>';
+            if (qualityTableBody) qualityTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">${data?.error || "Ошибка загрузки"}</td></tr>`;
+            if (qualityReviewList) qualityReviewList.innerHTML = '<div class="list-group-item text-muted">Ревизии не назначены</div>';
             return;
         }
 
         const aggregates = data.aggregates || [];
-        qualityTableBody.innerHTML = aggregates.length
+        if (qualityTableBody) qualityTableBody.innerHTML = aggregates.length
             ? aggregates
                   .map(
                       (item) => `
@@ -2171,7 +2193,7 @@ function initAdminDashboard() {
             : `<tr><td colspan="4" class="text-center text-muted py-3">Нет данных</td></tr>`;
 
         const reviews = data.reviews || [];
-        qualityReviewList.innerHTML = reviews.length
+        if (qualityReviewList) qualityReviewList.innerHTML = reviews.length
             ? reviews
                   .map(
                       (review) => `
@@ -2192,6 +2214,7 @@ function initAdminDashboard() {
     }
 
     async function loadTickets() {
+        if (!ticketsBoard) return;
         const { ok, data } = await API.get("/api/admin/tickets");
         if (!ok || data.error) {
             ticketsBoard.innerHTML = `<div class="text-danger small">${data?.error || "Ошибка загрузки"}</div>`;
@@ -2325,7 +2348,12 @@ function initAdminDashboard() {
     loadLatestScans();
     loadActivityLog();
     loadQualityData();
-    loadTickets();
+    loadWhIds();
+    if (ticketsBoard) loadTickets();
+
+    dashboardBlockErrorsSelect?.addEventListener("change", () => {
+        loadDashboardBlockErrors(dashboardBlockErrorsSelect.value?.trim() || "");
+    });
 
     refreshAdminBtn?.addEventListener("click", () => {
         loadAdminStats();
@@ -2334,7 +2362,9 @@ function initAdminDashboard() {
         loadLatestScans();
         loadActivityLog();
         loadQualityData();
-        loadTickets();
+        loadWhIds();
+        if (dashboardBlockErrorsSelect?.value) loadDashboardBlockErrors(dashboardBlockErrorsSelect.value);
+        if (ticketsBoard) loadTickets();
         showToastMessage("Данные админки обновлены", "info");
     });
 
@@ -2344,7 +2374,6 @@ function initAdminDashboard() {
 
     reportsModalEl?.addEventListener("show.bs.modal", () => {
         loadReports();
-        loadWhIds();
     });
 
     problemZonesTableBody?.addEventListener("click", (event) => {
@@ -2544,98 +2573,106 @@ function initAdminDashboard() {
     }
 
     async function loadWhIds() {
-        if (!whIdExportSelect) return;
         const { ok, data } = await API.get("/api/admin/wh_ids");
-        whIdExportSelect.innerHTML = "<option value=\"\">Выберите wh_id</option>";
-        if (!ok || data.error) return;
-        const list = data.wh_ids || [];
-        list.forEach((item) => {
-            const opt = document.createElement("option");
-            opt.value = item.wh_id;
-            opt.textContent = item.warehouse_name
-                ? `${item.wh_id} — ${item.warehouse_name}`
-                : String(item.wh_id);
-            whIdExportSelect.appendChild(opt);
-        });
+        const list = ok && !data.error ? (data.wh_ids || []) : [];
+        const optionHtml = (value, text) => `<option value="${value}">${text}</option>`;
+        if (dashboardBlockErrorsSelect) {
+            dashboardBlockErrorsSelect.innerHTML = "<option value=\"\">Выберите склад</option>" + list.map((item) => optionHtml(item.wh_id, item.warehouse_name ? `${item.wh_id} — ${item.warehouse_name}` : String(item.wh_id))).join("");
+        }
     }
 
-    async function loadBlockPlaces(whId) {
-        if (!blockRepairedSection || !blockPlacesBody || !blockPlacesCount) return;
-        blockRepairedSection.style.display = "none";
-        blockPlacesBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Загрузка…</td></tr>";
+    async function loadDashboardBlockErrors(whId) {
+        if (!dashboardBlockErrorsBody) return;
+        if (!whId) {
+            dashboardBlockErrorsBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-3 small\">Выберите склад</td></tr>";
+            if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = "";
+            return;
+        }
+        dashboardBlockErrorsBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Загрузка…</td></tr>";
+        if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = "";
         const { ok, data } = await API.get(`/api/admin/block/errors?wh_id=${encodeURIComponent(whId)}`);
         if (!ok || data.error) {
-            blockPlacesBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-2">${data.error || "Ошибка загрузки"}</td></tr>`;
-            blockRepairedSection.style.display = "block";
+            dashboardBlockErrorsBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-2">${data.error || "Ошибка загрузки"}</td></tr>`;
             return;
         }
         const places = data.places || [];
         if (places.length === 0) {
-            blockPlacesBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Нет мест с ошибками по этому складу</td></tr>";
-            blockPlacesCount.textContent = "";
+            dashboardBlockErrorsBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-3 small\">Нет ошибок по этому складу</td></tr>";
         } else {
-            blockPlacesBody.innerHTML = places.map((p) => {
-                const repaired = p.is_repaired ? "checked" : "";
-                const rowClass = p.is_repaired ? "table-success" : "";
+            dashboardBlockErrorsBody.innerHTML = places.map((p) => {
+                const status = p.place_status || "";
+                const rowClass = status === "repaired" ? "table-success" : status === "in_work" ? "table-warning" : "";
                 return `<tr class="${rowClass}" data-place-cod="${p.place_cod}">
                     <td>${(p.place_name || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")} / ${String(p.place_cod)}</td>
                     <td>${p.floor != null ? p.floor : "—"}</td>
                     <td>${p.row_num != null ? p.row_num : "—"}</td>
                     <td>${p.section != null ? p.section : "—"}</td>
-                    <td class="text-center">
-                        <input type="checkbox" class="form-check-input repaired-cb" ${repaired} data-place-cod="${p.place_cod}" aria-label="Починено">
+                    <td>
+                        <select class="form-select form-select-sm dashboard-place-status-select" data-place-cod="${p.place_cod}" aria-label="Статус">
+                            <option value=""${status === "" ? " selected" : ""}>—</option>
+                            <option value="in_work"${status === "in_work" ? " selected" : ""}>В работе</option>
+                            <option value="repaired"${status === "repaired" ? " selected" : ""}>Исправлено</option>
+                        </select>
                     </td>
                 </tr>`;
             }).join("");
-            const repairedCount = places.filter((p) => p.is_repaired).length;
-            blockPlacesCount.textContent = `Мест: ${places.length}, починено: ${repairedCount}. Починенные не попадают в выгрузку.`;
-            blockPlacesBody.querySelectorAll(".repaired-cb").forEach((cb) => {
-                cb.addEventListener("change", async function () {
+            dashboardBlockErrorsBody.querySelectorAll(".dashboard-place-status-select").forEach((sel) => {
+                sel.addEventListener("change", async function () {
                     const placeCod = this.dataset.placeCod;
-                    const isRepaired = this.checked;
-                    const method = isRepaired ? "POST" : "DELETE";
-                    const body = isRepaired ? JSON.stringify({ wh_id: parseInt(whId, 10), place_cod: parseInt(placeCod, 10) }) : undefined;
-                    const url = isRepaired ? "/api/admin/block/repaired" : `/api/admin/block/repaired?wh_id=${encodeURIComponent(whId)}&place_cod=${encodeURIComponent(placeCod)}`;
-                    const res = await fetch(url, { method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body });
-                    const json = await res.json().catch(() => ({}));
-                    if (res.ok && json.success) {
-                        const row = this.closest("tr");
-                        if (row) row.classList.toggle("table-success", isRepaired);
+                    const newStatus = this.value;
+                    const row = this.closest("tr");
+                    const currentWhId = dashboardBlockErrorsSelect?.value?.trim();
+                    if (!currentWhId) return;
+                    if (newStatus === "") {
+                        const res = await fetch(`/api/admin/block/repaired?wh_id=${encodeURIComponent(currentWhId)}&place_cod=${encodeURIComponent(placeCod)}`, { method: "DELETE", credentials: "include" });
+                        const json = await res.json().catch(() => ({}));
+                        if (res.ok && json.success) {
+                            row.classList.remove("table-success", "table-warning");
+                        } else {
+                            this.value = this.dataset.prevStatus || "";
+                        }
                     } else {
-                        this.checked = !isRepaired;
+                        const res = await fetch("/api/admin/block/repaired", {
+                            method: "POST",
+                            credentials: "include",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ wh_id: parseInt(currentWhId, 10), place_cod: parseInt(placeCod, 10), status: newStatus }),
+                        });
+                        const json = await res.json().catch(() => ({}));
+                        if (res.ok && json.success) {
+                            row.classList.remove("table-success", "table-warning");
+                            if (newStatus === "repaired") row.classList.add("table-success");
+                            if (newStatus === "in_work") row.classList.add("table-warning");
+                        } else {
+                            this.value = this.dataset.prevStatus || "";
+                        }
                     }
+                    this.dataset.prevStatus = this.value;
                 });
+                sel.dataset.prevStatus = sel.value;
             });
         }
-        blockRepairedSection.style.display = "block";
+        const inWorkCount = places.filter((p) => p.place_status === "in_work").length;
+        const repairedCount = places.filter((p) => p.place_status === "repaired").length;
+        if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = `Мест: ${places.length}, в работе: ${inWorkCount}, исправлено: ${repairedCount}.`;
+        refreshAnimations();
     }
 
-    whIdExportSelect?.addEventListener("change", () => {
-        const whId = whIdExportSelect.value?.trim();
-        if (whId) loadBlockPlaces(whId);
-        else if (blockRepairedSection) blockRepairedSection.style.display = "none";
-    });
-
-    exportBlockBtn?.addEventListener("click", async () => {
-        const whId = whIdExportSelect?.value?.trim();
-        if (!blockExportStatus) return;
-        blockExportStatus.textContent = "";
+    const dashboardExportBlockBtn = document.getElementById("dashboardExportBlockBtn");
+    dashboardExportBlockBtn?.addEventListener("click", async () => {
+        const whId = dashboardBlockErrorsSelect?.value?.trim();
         if (!whId) {
-            blockExportStatus.textContent = "Выберите wh_id";
-            blockExportStatus.className = "small text-warning";
+            showToastMessage("Выберите склад", "warning");
             return;
         }
-        exportBlockBtn.disabled = true;
-        blockExportStatus.className = "small text-muted";
-        blockExportStatus.textContent = "Формируем отчёт…";
+        dashboardExportBlockBtn.disabled = true;
         try {
             const base = window.location.origin;
             const url = `${base}/api/admin/export/block?wh_id=${encodeURIComponent(whId)}`;
             const res = await fetch(url, { credentials: "include" });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                blockExportStatus.textContent = err.error || `Ошибка ${res.status}`;
-                blockExportStatus.className = "small text-danger";
+                showToastMessage(err.error || `Ошибка ${res.status}`, "danger");
                 return;
             }
             const blob = await res.blob();
@@ -2645,13 +2682,11 @@ function initAdminDashboard() {
             a.download = name;
             a.click();
             URL.revokeObjectURL(a.href);
-            blockExportStatus.textContent = "Скачано";
-            blockExportStatus.className = "small text-success";
+            showToastMessage("Файл скачан", "success");
         } catch (e) {
-            blockExportStatus.textContent = "Ошибка: " + (e.message || "сеть");
-            blockExportStatus.className = "small text-danger";
+            showToastMessage("Ошибка: " + (e.message || "сеть"), "danger");
         } finally {
-            exportBlockBtn.disabled = false;
+            dashboardExportBlockBtn.disabled = false;
         }
     });
 

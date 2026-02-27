@@ -1,332 +1,201 @@
 {% extends "base.html" %}
 
 {% block head_extra %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.min.js') }}"></script>
 {% endblock %}
 
 {% block title %}Админ-панель{% endblock %}
 
 {% block content %}
-<header class="admin-header mb-4">
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-        <div>
-            <h1 class="h4 mb-0 fw-bold">Админ-панель</h1>
-            <p class="text-muted small mb-0 mt-1">Статистика и выгрузка отчётов по складу</p>
-        </div>
-        <div class="d-flex gap-2">
+<div class="admin-page">
+    <header class="admin-header mb-4">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div>
+                <h1 class="h4 mb-0 fw-bold">Админ-панель</h1>
+                <p class="text-muted small mb-0 mt-1">Ошибки по складам, выгрузки, аналитика</p>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
             <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshAdminBtn" title="Обновить данные">
-                <i class="bi bi-arrow-clockwise"></i>
+                <i class="bi bi-arrow-clockwise me-1"></i>Обновить
             </button>
             <button type="button" class="btn btn-primary btn-sm" id="exportBtn" data-bs-toggle="modal" data-bs-target="#reportsModal">
-                <i class="bi bi-file-earmark-arrow-down me-1"></i>Отчёты
+                <i class="bi bi-file-earmark-arrow-down me-1"></i>Сохранённые отчёты
             </button>
+            </div>
         </div>
-    </div>
-</header>
+    </header>
 
-<section class="admin-kpi row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="card h-100 admin-kpi-card">
-            <div class="card-body py-3 d-flex align-items-center gap-3">
-                <div class="admin-kpi-icon bg-primary bg-opacity-10 rounded-2 p-2">
-                    <i class="bi bi-qr-code-scan text-primary"></i>
-                </div>
-                <div class="min-w-0">
-                    <div class="small text-muted">Сканов сегодня</div>
-                    <div class="h5 mb-0 fw-bold" id="overallScannedValue">—</div>
-                    <span class="badge bg-success bg-opacity-10 text-success small" id="weeklyDelta">—</span>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card h-100 admin-kpi-card">
-            <div class="card-body py-3 d-flex align-items-center gap-3">
-                <div class="admin-kpi-icon bg-danger bg-opacity-10 rounded-2 p-2">
-                    <i class="bi bi-exclamation-triangle-fill text-danger"></i>
-                </div>
-                <div class="min-w-0">
-                    <div class="small text-muted">Расхождения</div>
-                    <div class="h5 mb-0 fw-bold text-danger" id="overallDiscrepancyValue">—</div>
-                    <div class="small text-muted" id="overallAccuracyLabel">—</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card h-100 admin-kpi-card">
-            <div class="card-body py-3 d-flex align-items-center gap-3">
-                <div class="admin-kpi-icon bg-success bg-opacity-10 rounded-2 p-2">
-                    <i class="bi bi-people-fill text-success"></i>
-                </div>
-                <div class="min-w-0">
-                    <div class="small text-muted">Сотрудники</div>
-                    <div class="h5 mb-0 fw-bold" id="overallEmployeesValue">—</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card h-100 admin-kpi-card">
-            <div class="card-body py-3 d-flex align-items-center gap-3">
-                <div class="admin-kpi-icon bg-info bg-opacity-10 rounded-2 p-2">
-                    <i class="bi bi-box-seam text-info"></i>
-                </div>
-                <div class="min-w-0">
-                    <div class="small text-muted">Уникальные МХ</div>
-                    <div class="h5 mb-0 fw-bold" id="overallPlacesValue">—</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="row g-4 mb-4">
-    <div class="col-lg-8">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Динамика за 7 дней</h2>
-            </div>
-            <div class="card-body py-3">
-                <canvas id="dailyChart" height="180" aria-label="График сканов"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Типы расхождений</h2>
-            </div>
-            <div class="card-body py-2 p-0">
-                <div id="discrepancyTypesList" class="list-group list-group-flush list-group-sm">
-                    <div class="list-group-item text-muted small">Нет данных</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="row g-4 mb-4">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                <h2 class="h6 mb-0 fw-semibold">Активные задания</h2>
-                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#assignTaskModal">
-                    <i class="bi bi-plus-lg me-1"></i>Назначить зону
-                </button>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>ID</th>
-                                <th>Сотрудник</th>
-                                <th>Зона</th>
-                                <th>Назначено</th>
-                                <th>Истекает</th>
-                                <th>Статус</th>
-                            </tr>
-                        </thead>
-                        <tbody id="activeTasksTableBody">
-                            <tr><td colspan="6" class="text-center text-muted py-3 small">Нет активных заданий</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Структура расхождений</h2>
-            </div>
-            <div class="card-body py-3">
-                <canvas id="statusChart" height="160" aria-label="Диаграмма статусов"></canvas>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="row g-4 mb-4">
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Топ сотрудников</h2>
-            </div>
-            <div class="card-body py-2">
-                <div id="topEmployeesList" class="d-flex flex-column gap-1 small">Нет данных</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-4" id="problemZonesBlock">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Проблемные МХ</h2>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Место</th>
-                                <th class="text-center">Сканов</th>
-                                <th class="text-center">Ошибок</th>
-                            </tr>
-                        </thead>
-                        <tbody id="problemZonesTableBody">
-                            <tr><td colspan="3" class="text-center text-muted py-2 small">Нет данных</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Зоны с расхождениями</h2>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Зона</th>
-                                <th class="text-center">Сканов</th>
-                                <th class="text-center">Ошибок</th>
-                                <th>Последний скан</th>
-                            </tr>
-                        </thead>
-                        <tbody id="qualityTableBody">
-                            <tr><td colspan="4" class="text-center text-muted py-2 small">Нет данных</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div id="qualityReviewList" class="d-none"></div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="row g-4 mb-4">
-    <div class="col-lg-6" id="ticketsBlock">
-        <div class="card h-100">
-            <div class="card-header py-2">
-                <h2 class="h6 mb-0 fw-semibold">Тикеты</h2>
-            </div>
-            <div class="card-body py-2 overflow-auto" style="max-height:220px">
-                <div id="ticketsBoard" class="small text-muted">Нет тикетов</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                <h2 class="h6 mb-0 fw-semibold">Фотофиксации</h2>
-                <span class="badge bg-info" id="photoGalleryCount">0</span>
-            </div>
-            <div class="card-body py-2 overflow-auto" style="max-height:220px">
-                <div id="adminPhotoGrid" class="photo-grid small">Нет фото</div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="card mb-4">
-    <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <h2 class="h6 mb-0 fw-semibold">Журнал событий</h2>
-        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="clearAdminLog">Очистить</button>
-    </div>
-    <div class="card-body py-2 overflow-auto small text-muted" style="max-height:180px">
-        <div id="adminActivityList">Нет событий</div>
-    </div>
-</section>
-
-<aside id="adminStatusBar" class="d-none card border-0 rounded-0">
-    <div class="card-body py-2 px-3 d-flex flex-wrap justify-content-between align-items-center gap-2 small">
-        <span id="adminStatusBarText">—</span>
-        <div class="d-flex gap-1">
-            <span class="badge bg-success" id="adminStatusChipAccuracy">—</span>
-            <span class="badge bg-warning text-dark" id="adminStatusChipWorkload">—</span>
-            <span class="badge bg-danger" id="adminStatusChipRisk">—</span>
-        </div>
-    </div>
-</aside>
-
-<!-- Модальное окно: назначить зону -->
-<div class="modal fade" id="assignTaskModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Назначить зону</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <form id="assignTaskForm">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="assignBadge">Бэйдж сотрудника</label>
-                        <input type="text" class="form-control" id="assignBadge" name="badge" required placeholder="Например, BADGE-123">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="assignZone">Префикс зоны</label>
-                        <input type="text" class="form-control" id="assignZone" name="zone" required placeholder="Например, Э6.01">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="assignHours">Часы на выполнение</label>
-                        <input type="number" class="form-control" id="assignHours" name="hours" value="2" min="1" max="12">
+    <!-- KPI — компактная строка -->
+    <section class="admin-kpi mb-4">
+        <div class="row g-2 g-md-3">
+            <div class="col-6 col-md-3">
+                <div class="card admin-kpi-card h-100">
+                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                        <div class="admin-kpi-icon bg-primary bg-opacity-10 rounded-2 p-2 flex-shrink-0">
+                            <i class="bi bi-qr-code-scan text-primary"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="small text-muted">Сканов сегодня</div>
+                            <div class="h5 mb-0 fw-bold" id="overallScannedValue">—</div>
+                            <span class="badge bg-success bg-opacity-10 text-success small" id="weeklyDelta">—</span>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="submit" class="btn btn-primary">Назначить</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Модальное окно: отчёты и выгрузка по wh_id -->
-<div class="modal fade" id="reportsModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Отчёты</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
-            <div class="modal-body">
-                <div class="mb-4">
-                    <h6 class="fw-semibold mb-2">Выгрузка ошибок по складу (wh_id)</h6>
-                    <p class="small text-muted mb-2">Выберите склад — выгрузится Excel с расхождениями. Починенные места в отчёт не попадают.</p>
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
-                        <select class="form-select form-select-sm" id="whIdExportSelect" style="max-width:220px">
-                            <option value="">Выберите wh_id</option>
+            <div class="col-6 col-md-3">
+                <div class="card admin-kpi-card h-100">
+                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                        <div class="admin-kpi-icon bg-danger bg-opacity-10 rounded-2 p-2 flex-shrink-0">
+                            <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="small text-muted">Расхождения</div>
+                            <div class="h5 mb-0 fw-bold text-danger" id="overallDiscrepancyValue">—</div>
+                            <div class="small text-muted" id="overallAccuracyLabel">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card admin-kpi-card h-100">
+                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                        <div class="admin-kpi-icon bg-success bg-opacity-10 rounded-2 p-2 flex-shrink-0">
+                            <i class="bi bi-people-fill text-success"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="small text-muted">Сотрудники</div>
+                            <div class="h5 mb-0 fw-bold" id="overallEmployeesValue">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card admin-kpi-card h-100">
+                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                        <div class="admin-kpi-icon bg-info bg-opacity-10 rounded-2 p-2 flex-shrink-0">
+                            <i class="bi bi-box-seam text-info"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="small text-muted">Уникальные МХ</div>
+                            <div class="h5 mb-0 fw-bold" id="overallPlacesValue">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="row g-4">
+        <!-- Основная колонка: ошибки по блоку + график -->
+        <div class="col-lg-8">
+            <section class="mb-4">
+                <div class="card">
+                    <div class="card-header py-2 d-flex flex-wrap align-items-center gap-2">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-exclamation-diamond me-1"></i>Ошибки по блоку</h2>
+                        <select class="form-select form-select-sm" id="dashboardBlockErrorsSelect" style="max-width:200px">
+                            <option value="">Выберите склад</option>
                         </select>
-                        <button type="button" class="btn btn-primary btn-sm" id="exportBlockBtn">
+                        <button type="button" class="btn btn-primary btn-sm" id="dashboardExportBlockBtn" title="Скачать Excel">
                             <i class="bi bi-download me-1"></i>Скачать Excel
                         </button>
-                        <span class="small text-muted" id="blockExportStatus"></span>
                     </div>
-                    <div class="mt-3" id="blockRepairedSection" style="display:none">
-                        <h6 class="mb-2 text-muted">Починенные места (исключены из выгрузки)</h6>
-                        <div class="table-responsive" style="max-height:240px; overflow-y:auto">
-                            <table class="table table-sm table-hover">
+                    <div class="card-body p-0">
+                        <p class="small text-muted px-3 pt-2 mb-0">Исправленные места не попадают в выгрузку. Меняйте статус в таблице.</p>
+                        <div class="table-responsive overflow-auto" style="max-height:340px">
+                            <table class="table table-sm table-hover align-middle mb-0">
                                 <thead class="table-light sticky-top">
                                     <tr>
                                         <th>Код МХ / ID</th>
                                         <th>Этаж</th>
                                         <th>Ряд</th>
                                         <th>Секция</th>
-                                        <th class="text-center">Починено</th>
+                                        <th>Статус</th>
                                     </tr>
                                 </thead>
-                                <tbody id="blockPlacesBody"></tbody>
+                                <tbody id="dashboardBlockErrorsBody">
+                                    <tr><td colspan="5" class="text-center text-muted py-4">Выберите склад</td></tr>
+                                </tbody>
                             </table>
                         </div>
-                        <p class="small text-muted mb-0 mt-1" id="blockPlacesCount"></p>
+                        <p class="small text-muted mb-0 px-3 py-2" id="dashboardBlockErrorsCount"></p>
                     </div>
                 </div>
-                <h6 class="fw-semibold mb-2">Сохранённые отчёты</h6>
+            </section>
+
+            <section class="mb-4">
+                <div class="card">
+                    <div class="card-header py-2">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-graph-up me-1"></i>Динамика за 7 дней</h2>
+                    </div>
+                    <div class="card-body py-3">
+                        <canvas id="dailyChart" height="180" aria-label="График сканов"></canvas>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Боковая колонка: типы расхождений, фото, журнал -->
+        <div class="col-lg-4">
+            <section class="mb-4">
+                <div class="card">
+                    <div class="card-header py-2">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-pie-chart me-1"></i>Типы расхождений</h2>
+                    </div>
+                    <div class="card-body py-2 p-0">
+                        <div id="discrepancyTypesList" class="list-group list-group-flush list-group-sm">
+                            <div class="list-group-item text-muted small">Нет данных</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="mb-4">
+                <div class="card">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-camera me-1"></i>Фотофиксации</h2>
+                        <span class="badge bg-info" id="photoGalleryCount">0</span>
+                    </div>
+                    <div class="card-body py-2 overflow-auto" style="max-height:200px">
+                        <div id="adminPhotoGrid" class="photo-grid small">Нет фото</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="mb-4">
+                <div class="card">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-journal-text me-1"></i>Журнал событий</h2>
+                        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="clearAdminLog">Очистить</button>
+                    </div>
+                    <div class="card-body py-2 overflow-auto small text-muted" style="max-height:200px">
+                        <div id="adminActivityList">Нет событий</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <aside id="adminStatusBar" class="d-none card border-0 rounded-0 mt-2">
+        <div class="card-body py-2 px-3 d-flex flex-wrap justify-content-between align-items-center gap-2 small">
+            <span id="adminStatusBarText">—</span>
+            <div class="d-flex gap-1">
+                <span class="badge bg-success" id="adminStatusChipAccuracy">—</span>
+                <span class="badge bg-warning text-dark" id="adminStatusChipWorkload">—</span>
+                <span class="badge bg-danger" id="adminStatusChipRisk">—</span>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<!-- Модальное окно: сохранённые отчёты -->
+<div class="modal fade" id="reportsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Сохранённые отчёты</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
                 <div class="table-responsive">
                     <table class="table table-sm align-middle">
                         <thead>

@@ -3,11 +3,11 @@
    Складская тема, читаемость, мобильность
    ======================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
-
+/* Шрифт: локально без зависимости от интернета; при наличии сети можно раскомментировать @import для Manrope */
+/* @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap'); */
 :root {
     /* Pantone: 675C (primary), 2395C (fuchsia), 254C (purple), 2617C (dark purple) */
-    --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     --primary: #6E2B62;
     --primary-hover: #5A2352;
     --primary-light: rgba(110, 43, 98, 0.12);

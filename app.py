@@ -279,15 +279,18 @@ def ensure_tasks_table():
                     resolver VARCHAR(100)
                 )
             """)
-            # Починенные места по блоку (wh_id): не попадают в отчёт по складу
+            # Починенные/в работе места по блоку (wh_id). status: 'repaired' (исключены из выгрузки), 'in_work'
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS repaired_places (
                     wh_id INTEGER NOT NULL,
                     place_cod BIGINT NOT NULL,
+                    status VARCHAR(20) DEFAULT 'repaired',
                     marked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (wh_id, place_cod)
                 )
             """)
+            # Миграция: добавить status в существующие таблицы (для старых БД)
+            cur.execute("ALTER TABLE repaired_places ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'repaired'")
             
             # Индексы
             cur.execute("""
@@ -1133,6 +1136,7 @@ def get_place(place_cod):
                 cur.execute(
                     """
                     SELECT 
+                        wh_id,
                         mx_id as place_cod, 
                         mx_code as place_name, 
                         0 as qty_shk,
@@ -1159,6 +1163,7 @@ def get_place(place_cod):
                 cur.execute(
                     """
                     SELECT 
+                        wh_id,
                         mx_id as place_cod, 
                         mx_code as place_name, 
                         0 as qty_shk,
@@ -1185,6 +1190,7 @@ def get_place(place_cod):
                     cur.execute(
                         """
                         SELECT 
+                            wh_id,
                             mx_id as place_cod, 
                             mx_code as place_name, 
                             0 as qty_shk,
@@ -1208,60 +1214,73 @@ def get_place(place_cod):
                     )
                     row = cur.fetchone()
 
-        if not row:
-            return jsonify({'error': 'Место не найдено'}), 404
+            if not row:
+                return jsonify({'error': 'Место не найдено'}), 404
 
-        # Определяем тип МХ — только Полка или Короб (без Микс)
-        def _resolve_mx_type(storage_type, box_type, dimensions, category=None):
-            for val in (storage_type, box_type, category):
-                if not val:
-                    continue
-                s = str(val).lower()
-                if 'короб' in s or 'box' in s:
+            # Определяем тип МХ — только Полка или Короб (без Микс)
+            def _resolve_mx_type(storage_type, box_type, dimensions, category=None):
+                for val in (storage_type, box_type, category):
+                    if not val:
+                        continue
+                    s = str(val).lower()
+                    if 'короб' in s or 'box' in s:
+                        return "Короб"
+                    if 'полка' in s or 'shelf' in s or 'стеллаж' in s:
+                        return "Полка"
+                    # "Микс" не выводим — определяем по габаритам ниже
+                if dimensions:
+                    try:
+                        parts = str(dimensions).replace('х', 'x').replace('Х', 'x').split('x')
+                        nums = [int(p.strip()) for p in parts if p.strip().isdigit()]
+                        if nums:
+                            max_d = max(nums)
+                            if max_d > 900:
+                                return "Полка"
+                            return "Короб"  # до 900 мм — короб
+                    except (ValueError, TypeError):
+                        pass
+                # При неизвестном/микс без габаритов — по умолчанию короб
+                if storage_type or box_type or category:
                     return "Короб"
-                if 'полка' in s or 'shelf' in s or 'стеллаж' in s:
-                    return "Полка"
-                # "Микс" не выводим — определяем по габаритам ниже
-            if dimensions:
-                try:
-                    parts = str(dimensions).replace('х', 'x').replace('Х', 'x').split('x')
-                    nums = [int(p.strip()) for p in parts if p.strip().isdigit()]
-                    if nums:
-                        max_d = max(nums)
-                        if max_d > 900:
-                            return "Полка"
-                        return "Короб"  # до 900 мм — короб
-                except (ValueError, TypeError):
-                    pass
-            # При неизвестном/микс без габаритов — по умолчанию короб
-            if storage_type or box_type or category:
-                return "Короб"
-            return None
+                return None
 
-        mx_type = _resolve_mx_type(
-            row.get('storage_type'), row.get('box_type'), row.get('dimensions'), row.get('category')
-        ) or "—"
-        
-        return jsonify(
-            {
-                'place_cod': row['place_cod'],
-                'place_name': row['place_name'],
-                'qty_shk': row['qty_shk'],
-                'mx_type': mx_type,
-                'storage_type': row['storage_type'],
-                'box_type': row['box_type'],
-                'dimensions': row['dimensions'],
-                'category': row['category'] or 'Не указана',
-                'floor': row['floor'],
-                'row_num': row['row_num'],
-                'section': row['section'],
-                'shelf': row['shelf'],
-                'cell': row['cell'],
-                'current_volume': float(row['current_volume']) if row['current_volume'] else None,
-                'current_occupancy': row['current_occupancy'],
-                'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-            }
-        )
+            mx_type = _resolve_mx_type(
+                row.get('storage_type'), row.get('box_type'), row.get('dimensions'), row.get('category')
+            ) or "—"
+
+            # Статус админа (В работе / Исправлено), если задан по wh_id
+            admin_status = None
+            wh_id = row.get('wh_id')
+            if wh_id is not None:
+                cur.execute(
+                    "SELECT status FROM repaired_places WHERE wh_id = %s AND place_cod = %s",
+                    (wh_id, row['place_cod']),
+                )
+                status_row = cur.fetchone()
+                if status_row and status_row.get('status'):
+                    admin_status = status_row['status']  # 'in_work' | 'repaired'
+
+            return jsonify(
+                {
+                    'place_cod': row['place_cod'],
+                    'place_name': row['place_name'],
+                    'qty_shk': row['qty_shk'],
+                    'mx_type': mx_type,
+                    'storage_type': row['storage_type'],
+                    'box_type': row['box_type'],
+                    'dimensions': row['dimensions'],
+                    'category': row['category'] or 'Не указана',
+                    'floor': row['floor'],
+                    'row_num': row['row_num'],
+                    'section': row['section'],
+                    'shelf': row['shelf'],
+                    'cell': row['cell'],
+                    'current_volume': float(row['current_volume']) if row['current_volume'] else None,
+                    'current_occupancy': row['current_occupancy'],
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                    'admin_status': admin_status,
+                }
+            )
 
     except Exception as e:
         logger.exception("Ошибка при получении данных о месте")
@@ -2244,17 +2263,25 @@ def get_admin_stats():
                     'last_scan': row['last_scan'].isoformat() if row['last_scan'] else None
                 })
             
-            # Статистика по типам расхождений
+            # Статистика по причинам расхождений (как выбирают сотрудники при скане)
             cur.execute("""
                 SELECT 
-                    status,
-                    COUNT(*) as count
+                    COALESCE(NULLIF(TRIM(discrepancy_reason), ''), NULL) AS reason_raw,
+                    COUNT(*) AS count
                 FROM inventory_results
                 WHERE has_discrepancy = TRUE
-                GROUP BY status
+                GROUP BY NULLIF(TRIM(discrepancy_reason), '')
                 ORDER BY count DESC
             """)
-            discrepancy_types = [dict(row) for row in cur.fetchall()]
+            discrepancy_types = []
+            for row in cur.fetchall():
+                reason = row['reason_raw']
+                label = (reason and reason.strip()) or "Причина не указана"
+                discrepancy_types.append({
+                    'reason': reason or '',
+                    'label': label,
+                    'count': row['count'],
+                })
             
             # Динамика по часам (последние 24 часа)
             cur.execute("""
@@ -2301,6 +2328,7 @@ def get_admin_latest_scans():
                        status, has_discrepancy, photo_filename,
                        created_at
                 FROM inventory_results
+                WHERE photo_filename IS NOT NULL AND TRIM(photo_filename) != ''
                 ORDER BY created_at DESC
                 LIMIT 12
             """)
@@ -2700,15 +2728,16 @@ def get_block_errors():
                     COALESCE(wp.floor, wp2.floor) AS floor,
                     COALESCE(wp.row_num, wp2.row_num) AS row_num,
                     COALESCE(wp.section, wp2.section) AS section,
-                    (EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod)) AS is_repaired
+                    (SELECT rp.status FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod LIMIT 1) AS place_status
                 FROM inventory_results ir
                 LEFT JOIN warehouse_places wp ON wp.mx_id = ir.place_cod
                 LEFT JOIN warehouse_places wp2 ON UPPER(TRIM(wp2.mx_code)) = UPPER(TRIM(ir.place_name))
                     AND ir.place_name IS NOT NULL AND ir.place_name != ''
                 WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
                   AND (wp.wh_id = %s OR wp2.wh_id = %s)
+                  AND COALESCE((SELECT rp.status FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod LIMIT 1), '') <> 'repaired'
                 ORDER BY ir.place_cod, ir.created_at DESC
-            """, (wh_id, wh_id, wh_id))
+            """, (wh_id, wh_id, wh_id, wh_id))
             rows = cur.fetchall()
         places = [
             {
@@ -2717,7 +2746,8 @@ def get_block_errors():
                 'floor': r['floor'],
                 'row_num': r['row_num'],
                 'section': r['section'],
-                'is_repaired': bool(r['is_repaired']),
+                'place_status': r['place_status'] if r.get('place_status') else None,
+                'is_repaired': r.get('place_status') == 'repaired',
             }
             for r in rows
         ]
@@ -2729,7 +2759,7 @@ def get_block_errors():
 
 @app.route('/api/admin/block/repaired', methods=['POST', 'DELETE'])
 def set_block_repaired():
-    """Отметить место как починено (POST) или снять отметку (DELETE). Тело/query: wh_id, place_cod."""
+    """Установить статус места: POST { wh_id, place_cod, status?: 'in_work'|'repaired' } или DELETE снять отметку."""
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
@@ -2737,9 +2767,13 @@ def set_block_repaired():
         data = request.get_json(silent=True) or {}
         wh_id_raw = data.get('wh_id')
         place_cod_raw = data.get('place_cod')
+        status = (data.get('status') or 'repaired').strip().lower()
+        if status not in ('in_work', 'repaired'):
+            status = 'repaired'
     else:
         wh_id_raw = request.args.get('wh_id')
         place_cod_raw = request.args.get('place_cod')
+        status = None
     if wh_id_raw is None or place_cod_raw is None:
         return jsonify({'error': 'Нужны wh_id и place_cod'}), 400
     try:
@@ -2752,13 +2786,13 @@ def set_block_repaired():
         with conn.cursor() as cur:
             if request.method == 'POST':
                 cur.execute("""
-                    INSERT INTO repaired_places (wh_id, place_cod) VALUES (%s, %s)
-                    ON CONFLICT (wh_id, place_cod) DO NOTHING
-                """, (wh_id, place_cod))
+                    INSERT INTO repaired_places (wh_id, place_cod, status) VALUES (%s, %s, %s)
+                    ON CONFLICT (wh_id, place_cod) DO UPDATE SET status = EXCLUDED.status, marked_at = CURRENT_TIMESTAMP
+                """, (wh_id, place_cod, status))
             else:
                 cur.execute("DELETE FROM repaired_places WHERE wh_id = %s AND place_cod = %s", (wh_id, place_cod))
         conn.commit()
-        return jsonify({'success': True, 'is_repaired': request.method == 'POST'})
+        return jsonify({'success': True, 'status': status if request.method == 'POST' else None})
     except Exception as e:
         logger.exception("Ошибка установки починено")
         return jsonify({'error': str(e)}), 500
@@ -2835,13 +2869,10 @@ def export_block_errors():
                     AND ir.place_name IS NOT NULL AND ir.place_name != ''
                 WHERE (ir.has_discrepancy = TRUE OR LOWER(COALESCE(ir.status, '')) <> 'ok')
                   AND (wp.wh_id = %s OR wp2.wh_id = %s)
-                  AND NOT EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod)
+                  AND NOT EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod AND (rp.status = 'repaired' OR rp.status IS NULL))
             """
             cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (wh_id, wh_id, wh_id))
             rows = cur.fetchall()
-
-        if not rows:
-            return jsonify({'error': f'По wh_id {wh_id} нет записей с расхождениями'}), 404
 
         def _status_label(s):
             if not s:
