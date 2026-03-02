@@ -206,13 +206,14 @@ function showAlert(element, message, type = "danger") {
         return;
     }
     element.textContent = message;
-    element.classList.remove("d-none", "alert-danger", "alert-success", "alert-info");
-    element.classList.add(`alert-${type}`);
+    element.classList.remove("d-none", "alert-danger", "alert-success", "alert-info", "alert-warning", "alert-animate");
+    element.classList.add(`alert-${type}`, "alert-animate");
 }
 
 function hideAlert(element) {
     if (!element) return;
     element.classList.add("d-none");
+    element.classList.remove("alert-animate");
 }
 
 function showToastMessage(message, type = "success") {
@@ -255,8 +256,12 @@ function initThemeToggle() {
     toggle?.addEventListener("click", () => {
         const current = document.body.dataset.theme === "dark" ? "dark" : "light";
         const next = current === "dark" ? "light" : "dark";
+        toggle.classList.add("theme-toggle--clicked", next === "dark" ? "theme-sunset" : "theme-sunrise");
         applyTheme(next);
         localStorage.setItem("inventory-theme", next);
+        setTimeout(() => {
+            toggle.classList.remove("theme-toggle--clicked", "theme-sunset", "theme-sunrise");
+        }, 650);
     });
 }
 
@@ -408,17 +413,18 @@ function initLoginPage() {
         }
 
         connectionBadge.textContent = "Проверяем соединение…";
-        connectionBadge.className = "badge rounded-pill text-bg-secondary";
+        connectionBadge.className = "badge rounded-pill text-bg-secondary connection-status";
+        connectionBadge.classList.remove("connection-online", "connection-offline");
 
         const { ok, data } = await API.get("/api/ping");
         if (ok && data?.ok) {
             connectionBadge.textContent = "Онлайн: связь с сервером";
-            connectionBadge.className = "badge rounded-pill text-bg-success";
+            connectionBadge.className = "badge rounded-pill text-bg-success connection-status connection-online";
             connectionBadge.classList.add("badge-pulse-once");
             setTimeout(() => connectionBadge.classList.remove("badge-pulse-once"), 1300);
         } else {
             connectionBadge.textContent = data?.error || "Проблемы соединения";
-            connectionBadge.className = "badge rounded-pill text-bg-warning";
+            connectionBadge.className = "badge rounded-pill text-bg-warning connection-status connection-offline";
         }
     }
 
@@ -566,8 +572,17 @@ function initWorkPage() {
     const scanOnlyOkBtn = document.getElementById("scanOnlyOkBtn");
     const scanOnlyErrorBtn = document.getElementById("scanOnlyErrorBtn");
     const placeCardSwipeHint = document.getElementById("placeCardSwipeHint");
+    const repeatMxChip = document.getElementById("repeatMxChip");
+    const repeatMxChipLabel = document.getElementById("repeatMxChipLabel");
+    const todaySavedCountEl = document.getElementById("todaySavedCount");
 
     badgeLabel.textContent = badge;
+
+    function updateTodaySavedCount() {
+        if (!todaySavedCountEl) return;
+        todaySavedCountEl.textContent = state.savedCount;
+        todaySavedCountEl.setAttribute("data-count", String(state.savedCount));
+    }
 
     function applyScanOnlyMode() {
         const on = state.scanOnlyMode;
@@ -896,6 +911,18 @@ function initWorkPage() {
         refreshAnimations();
     }
 
+    function historyEmptyRow(iconClass, title, text, isError = false) {
+        return `<tr class="history-empty-row">
+            <td colspan="5" class="p-0 border-0">
+                <div class="history-empty-state ${isError ? "history-empty-state-error" : ""}">
+                    <i class="bi ${iconClass} history-empty-icon"></i>
+                    <p class="history-empty-title">${title}</p>
+                    <p class="history-empty-text">${text}</p>
+                </div>
+            </td>
+        </tr>`;
+    }
+
     async function loadHistory() {
         if (!historyTableBody) return;
         const params = new URLSearchParams();
@@ -905,28 +932,37 @@ function initWorkPage() {
         if (from) params.set("from", from);
         if (to) params.set("to", to);
 
-        historyTableBody.innerHTML =
-            '<tr><td colspan="5" class="text-center text-muted py-4">Загружаем историю…</td></tr>';
+        historyTableBody.innerHTML = historyEmptyRow(
+            "bi-hourglass-split",
+            "Загружаем…",
+            "Подождите, загружаем историю сканов"
+        );
 
         const { ok, data } = await API.get(`/api/user/history?${params.toString()}`);
         if (!ok || data.error) {
-            historyTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">${
-                data?.error || "Не удалось загрузить историю"
-            }</td></tr>`;
+            historyTableBody.innerHTML = historyEmptyRow(
+                "bi-exclamation-triangle",
+                "Ошибка",
+                data?.error || "Не удалось загрузить историю",
+                true
+            );
             return;
         }
 
         const history = data.history || [];
         if (!history.length) {
-            historyTableBody.innerHTML =
-                '<tr><td colspan="5" class="text-center text-muted py-4">Записей за выбранный период нет</td></tr>';
+            historyTableBody.innerHTML = historyEmptyRow(
+                "bi-inbox",
+                "Записей нет",
+                "За выбранный период сканов не найдено"
+            );
             return;
         }
 
         historyTableBody.innerHTML = history
             .map(
                 (item) => `
-            <tr>
+            <tr class="history-row">
                 <td>${formatDate(item.created_at)}</td>
                 <td class="fw-semibold">${item.place_name || "—"}</td>
                 <td>${item.status || "—"}</td>
@@ -969,6 +1005,10 @@ function initWorkPage() {
         placeUpdatedLabel.textContent = data.updated_at ? `Обновлено ${formatDate(data.updated_at)}` : "—";
         state.lastMxCode = data.place_cod;
         state.currentPlace = { place_cod: data.place_cod, place_name: data.place_name, qty_db: data.qty_shk, mx_type: data.mx_type };
+        if (repeatMxChip && repeatMxChipLabel) {
+            repeatMxChipLabel.textContent = "Повторить: " + (data.place_name || data.place_cod || "").toString().slice(0, 20);
+            repeatMxChip.classList.remove("d-none");
+        }
         showAlert(placeAlert, fromCache ? "Карточка МХ (из кэша)" : "Карточка МХ загружена", "success");
         placeInput.classList.add("is-valid");
         const placeCard = document.getElementById("placeCard");
@@ -978,6 +1018,8 @@ function initWorkPage() {
             setTimeout(() => placeCardSwipeHint?.classList.add("d-none"), 3500);
         }
         logEvent(`Загружено место ${data.place_name ?? data.place_cod}${fromCache ? " [кэш]" : ""}`, "info");
+        const placeCardEl = document.getElementById("placeCard");
+        if (placeCardEl) placeCardEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
         loadRouteSuggestions();
     }
 
@@ -998,7 +1040,10 @@ function initWorkPage() {
             }
         }
 
+        const placeCard = document.getElementById("placeCard");
+        if (placeCard) placeCard.classList.add("is-loading");
         const { ok, data } = await API.get(`/api/place/${encodeURIComponent(placeCod)}`);
+        if (placeCard) placeCard.classList.remove("is-loading");
         if (!ok || data.error) {
             const errorMessage = data.error || "Место не найдено";
             showAlert(placeAlert, errorMessage);
@@ -1293,22 +1338,34 @@ function initWorkPage() {
             if (placeKey) state.scannedPlaceCodes.add(placeKey);
         }
         state.savedCount += 1;
+        updateTodaySavedCount();
         if (state.photoData) {
             state.photoUploads += 1;
         }
         showToastMessage("Результат сохранен");
+        if (saveScanBtn) {
+            saveScanBtn.classList.add("save-success");
+            setTimeout(() => saveScanBtn.classList.remove("save-success"), 600);
+        }
+        const placeCard = document.getElementById("placeCard");
+        if (placeCard) {
+            placeCard.classList.add("scan-success");
+            setTimeout(() => placeCard.classList.remove("scan-success"), 800);
+        }
         logEvent(`Место ${state.lastMxCode} сохранено со статусом ${state.currentStatus}`, "success");
         const nextMx = state.quickScanMode && state.suggestions.length
             ? state.suggestions.find((s) => !state.scannedPlaceCodes.has((s.mx_code || "").toString().trim().toUpperCase()))?.mx_code
             : null;
-        clearPlaceCard();
-        loadRouteSuggestions();
-        if (nextMx && placeInput) {
-            placeInput.value = nextMx;
-            placeInput.classList.add("is-valid");
-            loadPlace(nextMx);
-        }
-        placeInput?.focus();
+        setTimeout(() => {
+            clearPlaceCard();
+            loadRouteSuggestions();
+            if (nextMx && placeInput) {
+                placeInput.value = nextMx;
+                placeInput.classList.add("is-valid");
+                loadPlace(nextMx);
+            }
+            placeInput?.focus();
+        }, 850);
     }
 
     function logEvent(text, type = "info") {
@@ -1581,6 +1638,13 @@ function initWorkPage() {
         }
     });
     clearPlaceBtn?.addEventListener("click", clearPlaceCard);
+    repeatMxChip?.addEventListener("click", () => {
+        if (state.lastMxCode && placeInput) {
+            placeInput.value = state.lastMxCode;
+            placeInput.classList.add("is-valid");
+            loadPlace(state.lastMxCode);
+        }
+    });
     historyReloadBtn?.addEventListener("click", () => {
         loadHistory();
         logEvent("История сканов обновлена", "info");
@@ -1790,6 +1854,7 @@ function initWorkPage() {
 
     applyScanOnlyMode();
     setTodayDates();
+    updateTodaySavedCount();
     loadRouteSuggestions();
     renderLastPlaces();
     updateStatusLabel();
@@ -1898,6 +1963,8 @@ function initAdminDashboard() {
     const ticketsBlock = document.getElementById("ticketsBlock");
     const dashboardBlockErrorsSelect = document.getElementById("dashboardBlockErrorsSelect");
     const dashboardBlockErrorsBody = document.getElementById("dashboardBlockErrorsBody");
+    const dashboardBlockErrorsEmpty = document.getElementById("dashboardBlockErrorsEmpty");
+    const dashboardBlockErrorsTableWrap = document.getElementById("dashboardBlockErrorsTableWrap");
     const dashboardBlockErrorsCount = document.getElementById("dashboardBlockErrorsCount");
     const adminStatusBar = document.getElementById("adminStatusBar");
     const adminStatusBarText = document.getElementById("adminStatusBarText");
@@ -1926,6 +1993,11 @@ function initAdminDashboard() {
         overallDiscrepancyValue.textContent = overall.with_discrepancy ?? 0;
         overallEmployeesValue.textContent = overall.total_employees ?? 0;
         overallPlacesValue.textContent = overall.unique_places ?? 0;
+
+        document.querySelectorAll(".admin-kpi-card").forEach((card) => {
+            card.classList.add("kpi-just-loaded");
+            setTimeout(() => card.classList.remove("kpi-just-loaded"), 500);
+        });
 
         const accuracy = overall.total_scanned
             ? (((overall.no_discrepancy || 0) / overall.total_scanned) * 100).toFixed(1)
@@ -2584,11 +2656,15 @@ function initAdminDashboard() {
     async function loadDashboardBlockErrors(whId) {
         if (!dashboardBlockErrorsBody) return;
         if (!whId) {
-            dashboardBlockErrorsBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-3 small\">Выберите склад</td></tr>";
+            if (dashboardBlockErrorsEmpty) dashboardBlockErrorsEmpty.classList.remove("d-none");
+            if (dashboardBlockErrorsTableWrap) dashboardBlockErrorsTableWrap.classList.add("d-none");
             if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = "";
             return;
         }
-        dashboardBlockErrorsBody.innerHTML = "<tr><td colspan=\"5\" class=\"text-center text-muted py-2\">Загрузка…</td></tr>";
+        if (dashboardBlockErrorsEmpty) dashboardBlockErrorsEmpty.classList.add("d-none");
+        if (dashboardBlockErrorsTableWrap) dashboardBlockErrorsTableWrap.classList.remove("d-none");
+        const skeletonRows = Array(4).fill("<tr><td colspan=\"5\" class=\"px-3 py-2\"><div class=\"skeleton skeleton-line\"></div><div class=\"skeleton skeleton-line\"></div><div class=\"skeleton skeleton-line\"></div></td></tr>").join("");
+        dashboardBlockErrorsBody.innerHTML = skeletonRows;
         if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = "";
         const { ok, data } = await API.get(`/api/admin/block/errors?wh_id=${encodeURIComponent(whId)}`);
         if (!ok || data.error) {
@@ -2665,6 +2741,8 @@ function initAdminDashboard() {
             showToastMessage("Выберите склад", "warning");
             return;
         }
+        const globalProgressBar = document.getElementById("globalProgressBar");
+        if (globalProgressBar) globalProgressBar.classList.remove("d-none");
         dashboardExportBlockBtn.disabled = true;
         try {
             const base = window.location.origin;
@@ -2686,6 +2764,7 @@ function initAdminDashboard() {
         } catch (e) {
             showToastMessage("Ошибка: " + (e.message || "сеть"), "danger");
         } finally {
+            if (globalProgressBar) globalProgressBar.classList.add("d-none");
             dashboardExportBlockBtn.disabled = false;
         }
     });

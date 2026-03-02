@@ -12,7 +12,9 @@
     {% block head_extra %}{% endblock %}
 </head>
 <body class="d-flex flex-column" data-page="{{ request.endpoint or '' }}" data-badge="{{ employee_badge|default('', true) }}" data-theme="light" data-bs-theme="light">
-
+<div class="progress-bar-top d-none" id="globalProgressBar" aria-hidden="true">
+    <div class="progress-bar-inner"></div>
+</div>
 <header class="navbar app-header sticky-top">
     <div class="container-fluid justify-content-between align-items-center py-3 px-3 px-md-4">
         <a class="navbar-brand d-flex align-items-center gap-2" href="/">
@@ -24,7 +26,6 @@
                 <span class="theme-toggle-track">
                     <i class="bi bi-brightness-high-fill theme-icon-sun"></i>
                     <i class="bi bi-moon-stars-fill theme-icon-moon"></i>
-                    <span class="theme-toggle-thumb"></span>
                 </span>
             </button>
             <button class="btn btn-outline-secondary btn-sm rounded-circle p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#mainMenu" aria-controls="mainMenu">

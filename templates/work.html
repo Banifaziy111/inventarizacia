@@ -7,10 +7,10 @@
 {% block title %}Рабочее место{% endblock %}
 
 {% block content %}
-<section class="mb-4">
+<section class="mb-4 content-fade-in">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
-            <h1 class="h4 mb-0">Сканирование мест</h1>
+            <h1 class="h4 mb-0 heading-gradient">Сканирование мест</h1>
             <p class="text-muted small mb-0">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
         </div>
         <div class="d-flex gap-2 align-items-center">
@@ -26,7 +26,13 @@
             </div>
         </div>
     </div>
-    <p class="text-muted small mt-1 mb-0" id="lastSyncLabel">Синхронизация: —</p>
+    <p class="text-muted small mt-1 mb-0 d-flex align-items-center gap-2 flex-wrap">
+        <span id="lastSyncLabel">Синхронизация: —</span>
+        <span class="today-saved-wrap">
+            <span class="text-muted">·</span>
+            <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
+        </span>
+    </p>
 </section>
 
 <section class="card mb-4 scan-hero">
@@ -46,6 +52,10 @@
                         <button type="button" class="btn btn-outline-secondary" id="clearPlaceBtn">Очистить</button>
                         <button type="button" class="btn btn-outline-primary btn-qr" id="openQrScannerBtn">
                             <i class="bi bi-qr-code me-1"></i>QR
+                        </button>
+                        <button type="button" class="repeat-mx-chip d-none" id="repeatMxChip" title="Загрузить этот МХ снова">
+                            <i class="bi bi-arrow-repeat"></i>
+                            <span id="repeatMxChipLabel">Повторить</span>
                         </button>
                     </div>
                     <p class="form-text small mt-2 mb-0">Сканер, камера или ввод вручную</p>
@@ -82,6 +92,7 @@
                                 </div>
                             </div>
                         </div>
+                        <p class="place-card-empty-hint text-muted small text-center mb-0 mt-2" id="placeCardEmptyHint">Введите код МХ и нажмите «Получить»</p>
                         <div class="alert alert-info py-2 mb-0 d-none" id="placeAlert" role="alert"></div>
                     </div>
                 </div>
@@ -90,10 +101,10 @@
         <div class="scan-only-only mt-3 d-none" id="scanOnlyActions">
             <p class="small text-muted mb-2 text-center">Свайп по карточке или кнопки</p>
             <div class="d-flex gap-3 justify-content-center flex-wrap">
-                <button type="button" class="btn btn-success btn-lg scan-only-btn" id="scanOnlyOkBtn" data-scan-status="ok">
+                <button type="button" class="btn btn-success btn-lg scan-only-btn touch-target" id="scanOnlyOkBtn" data-scan-status="ok">
                     <i class="bi bi-check-circle-fill me-2"></i>Совпадает
                 </button>
-                <button type="button" class="btn btn-danger btn-lg scan-only-btn" id="scanOnlyErrorBtn" data-scan-status="error">
+                <button type="button" class="btn btn-danger btn-lg scan-only-btn touch-target" id="scanOnlyErrorBtn" data-scan-status="error">
                     <i class="bi bi-x-circle-fill me-2"></i>Ошибка
                 </button>
             </div>
@@ -172,10 +183,10 @@
     </div>
 </section>
 
-<section class="card mb-4 full-mode-only">
+<section class="card mb-4 full-mode-only card-history">
     <div class="card-body">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-            <h3 class="h6 mb-0">История сканов</h3>
+            <h3 class="h6 mb-0 section-title"><i class="bi bi-clock-history"></i>История сканов</h3>
             <div class="d-flex gap-1 align-items-center">
                 <input type="date" class="form-control form-control-sm" id="historyFrom" style="max-width:140px">
                 <input type="date" class="form-control form-control-sm" id="historyTo" style="max-width:140px">
@@ -185,23 +196,31 @@
                 </button>
             </div>
         </div>
-        <div class="table-responsive">
+        <div class="table-responsive table-wrap-history">
             <table class="table table-sm table-hover">
                 <thead>
                 <tr><th>Время</th><th>МХ</th><th>Статус</th><th>Расх.</th><th>Фото</th></tr>
                 </thead>
                 <tbody id="historyTableBody">
-                <tr><td colspan="5" class="text-center text-muted py-3">Укажите период и нажмите «Показать»</td></tr>
+                <tr class="history-empty-row">
+                    <td colspan="5" class="p-0 border-0">
+                        <div class="history-empty-state" id="historyEmptyState">
+                            <i class="bi bi-calendar3 history-empty-icon"></i>
+                            <p class="history-empty-title">Выберите период</p>
+                            <p class="history-empty-text">Укажите даты и нажмите «Показать» — здесь появятся ваши сканы</p>
+                        </div>
+                    </td>
+                </tr>
                 </tbody>
             </table>
         </div>
     </div>
 </section>
 
-<aside class="card mb-4 full-mode-only" id="notificationPanel">
+<aside class="card mb-4 full-mode-only card-journal" id="notificationPanel">
     <div class="card-body py-2">
         <div class="d-flex justify-content-between align-items-center">
-            <span class="small fw-semibold">Журнал</span>
+            <span class="small fw-semibold section-title-inline"><i class="bi bi-journal-text me-1"></i>Журнал</span>
             <button class="btn btn-link btn-sm p-0 text-muted" id="clearLogBtn">очистить</button>
         </div>
         <div class="small text-muted mt-1" id="notificationList">Нет событий</div>
