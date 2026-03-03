@@ -269,6 +269,7 @@
 </div>
 
 <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
+    <button type="button" class="btn btn-danger qr-modal-float-close d-none" id="qrModalFloatClose" aria-label="Закрыть сканер" title="Закрыть">✕ Закрыть</button>
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header d-flex align-items-center justify-content-between">
@@ -278,9 +279,11 @@
                     <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Закрыть"></button>
                 </div>
             </div>
-            <div class="modal-body">
+            <div class="modal-body qr-modal-body">
                 <p class="small text-muted">Наведите камеру на QR-код</p>
-                <div id="qrReader" class="border rounded overflow-hidden"></div>
+                <div class="qr-reader-wrap">
+                    <div id="qrReader" class="border rounded"></div>
+                </div>
                 <p class="text-center mt-2 mb-0"><span class="badge bg-secondary" id="qrStatus">Инициализация</span></p>
             </div>
             <div class="modal-footer d-flex justify-content-between">

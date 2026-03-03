@@ -1932,6 +1932,51 @@ body.modal-open .admin-status-bar {
     opacity: 0.5;
 }
 
+/* QR-модалка: шапка и футер поверх оверлеев библиотеки сканера, область сканера ограничена */
+#qrModal .modal-content {
+    display: flex;
+    flex-direction: column;
+}
+#qrModal .modal-header,
+#qrModal .modal-footer {
+    position: relative;
+    z-index: 20;
+    pointer-events: auto;
+    background: var(--bg-surface);
+}
+#qrModal .modal-body.qr-modal-body {
+    position: relative;
+    z-index: 0;
+    flex: 0 0 auto;
+}
+#qrModal .qr-reader-wrap {
+    position: relative;
+    overflow: hidden;
+    max-height: 280px;
+    z-index: 0;
+}
+#qrModal #qrReader {
+    position: relative;
+    z-index: 0;
+}
+#qrModal #qrReader > * {
+    max-height: 280px;
+}
+
+/* Плавающая кнопка «Закрыть» поверх всего — на случай оверлея библиотеки сканера */
+.qr-modal-float-close {
+    position: fixed;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 1100;
+    padding: 0.5rem 0.75rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+#qrModal.show .qr-modal-float-close {
+    display: inline-flex !important;
+}
+
 .modal-content {
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);

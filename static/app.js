@@ -1804,6 +1804,10 @@ function initWorkPage() {
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
     qrModalEl?.addEventListener("hidden.bs.modal", stopQrScanner);
+    const qrModalFloatClose = document.getElementById("qrModalFloatClose");
+    qrModalFloatClose?.addEventListener("click", () => {
+        qrModalInstance?.hide();
+    });
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;
         setTorch(!qrTorchOn);
