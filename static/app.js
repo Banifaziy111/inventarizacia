@@ -719,6 +719,9 @@ function initWorkPage() {
     let qrModalInstance = null;
     let qrVideoTrack = null;
     let qrTorchOn = false;
+    let qrOverlayRoot = null;
+    let qrOverlayStatusEl = null;
+    let qrOverlayTorchBtn = null;
 
     const STATUS_META = {
         ok: { label: "Совпадает", badge: "success" },
@@ -1459,9 +1462,10 @@ function initWorkPage() {
     }
 
     function updateQrStatus(text, type = "secondary") {
-        if (!qrStatusBadge) return;
-        qrStatusBadge.textContent = text;
-        qrStatusBadge.className = `badge text-bg-${type}`;
+        const el = qrOverlayStatusEl || qrStatusBadge;
+        if (!el) return;
+        el.textContent = text;
+        el.className = `badge text-bg-${type}`;
     }
 
     function isCameraApiAvailable() {
@@ -1469,7 +1473,9 @@ function initWorkPage() {
     }
 
     function getQrVideoTrack() {
-        const video = qrReaderEl?.querySelector("video");
+        const root = document.getElementById("qrReaderLive") || qrReaderEl;
+        if (!root) return null;
+        const video = root.querySelector("video");
         if (!video?.srcObject) return null;
         const tracks = video.srcObject.getVideoTracks();
         return tracks.length ? tracks[0] : null;
@@ -1482,6 +1488,12 @@ function initWorkPage() {
         if (qrTorchIcon) qrTorchIcon.className = on ? "bi bi-flashlight-fill" : "bi bi-flashlight";
         if (qrTorchLabel) qrTorchLabel.textContent = on ? "Выкл. фонарик" : "Фонарик";
         if (qrTorchBtn) qrTorchBtn.title = on ? "Выключить фонарик" : "Включить фонарик";
+        if (qrOverlayTorchBtn) {
+            const icon = qrOverlayTorchBtn.querySelector(".bi");
+            const label = qrOverlayTorchBtn.querySelector("[data-torch-label]");
+            if (icon) icon.className = on ? "bi bi-flashlight-fill" : "bi bi-flashlight";
+            if (label) label.textContent = on ? "Выкл. фонарик" : "Фонарик";
+        }
     }
 
     async function stopQrScanner() {
@@ -1491,6 +1503,7 @@ function initWorkPage() {
             qrTorchOn = false;
         }
         if (qrTorchBtn) qrTorchBtn.classList.add("d-none");
+        if (qrOverlayTorchBtn) qrOverlayTorchBtn.classList.add("d-none");
         if (qrScanner) {
             try {
                 await qrScanner.stop();
@@ -1509,9 +1522,22 @@ function initWorkPage() {
         updateQrStatus("Сканер остановлен", "secondary");
     }
 
+    function closeQrOverlay() {
+        if (qrScanner) {
+            stopQrScanner().catch(() => {});
+        } else {
+            updateQrStatus("Сканер остановлен", "secondary");
+        }
+        if (qrOverlayRoot && qrOverlayRoot.parentNode) {
+            qrOverlayRoot.parentNode.removeChild(qrOverlayRoot);
+        }
+        qrOverlayRoot = null;
+        qrOverlayStatusEl = null;
+        qrOverlayTorchBtn = null;
+    }
+
     async function startQrScanner() {
-        // Проверяем, что контейнер для видео есть на странице
-        if (!qrReaderEl) {
+        if (!openQrScannerBtn && !fabScanBtn) {
             showAlert(placeAlert, "Сканер QR недоступен на этой странице");
             return;
         }
@@ -1551,17 +1577,41 @@ function initWorkPage() {
             return;
         }
 
-        if (!qrModalInstance && typeof bootstrap !== "undefined" && qrModalEl) {
-            qrModalInstance = new bootstrap.Modal(qrModalEl);
-        }
-        qrModalInstance?.show();
+        closeQrOverlay();
+
+        const overlay = document.createElement("div");
+        overlay.className = "qr-custom-overlay";
+        overlay.setAttribute("role", "dialog");
+        overlay.setAttribute("aria-label", "Сканер QR-кода");
+        overlay.innerHTML = [
+            '<div class="qr-custom-overlay__panel">',
+            '<button type="button" class="btn btn-sm btn-outline-secondary qr-custom-overlay__close" aria-label="Закрыть">Закрыть</button>',
+            '<h5 class="qr-custom-overlay__title">QR-код</h5>',
+            '<p class="small text-muted mb-2">Наведите камеру на QR-код</p>',
+            '<div class="qr-custom-overlay__reader"><div id="qrReaderLive" class="border rounded"></div></div>',
+            '<span class="badge text-bg-secondary qr-custom-overlay__status" id="qrOverlayStatus">Инициализация</span>',
+            '<div class="qr-custom-overlay__footer">',
+            '<button type="button" class="btn btn-outline-secondary btn-sm d-none" id="qrOverlayTorchBtn" title="Фонарик"><i class="bi bi-flashlight"></i> <span data-torch-label>Фонарик</span></button>',
+            '<button type="button" class="btn btn-secondary btn-sm qr-custom-overlay__close">Закрыть</button>',
+            "</div></div>",
+        ].join("");
+        document.body.appendChild(overlay);
+        qrOverlayRoot = overlay;
+        qrOverlayStatusEl = document.getElementById("qrOverlayStatus");
+        qrOverlayTorchBtn = document.getElementById("qrOverlayTorchBtn");
+
+        const closeBtn = () => closeQrOverlay();
+        overlay.querySelectorAll(".qr-custom-overlay__close").forEach((btn) => btn.addEventListener("click", closeBtn));
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) closeBtn(); });
+        if (qrOverlayTorchBtn) qrOverlayTorchBtn.addEventListener("click", () => { if (!qrVideoTrack) return; setTorch(!qrTorchOn); });
+
         updateQrStatus("Инициализация камеры...", "warning");
 
         if (qrScanner) {
             await stopQrScanner();
         }
 
-        qrScanner = new Html5Qrcode("qrReader");
+        qrScanner = new Html5Qrcode("qrReaderLive");
         try {
             const cameras = await Html5Qrcode.getCameras();
             if (!cameras || !cameras.length) {
@@ -1585,7 +1635,8 @@ function initWorkPage() {
                     );
                 }) || cameras[0];
 
-            const qrbox = Math.min(qrReaderEl.offsetWidth || 280, 320);
+            const readerLive = document.getElementById("qrReaderLive");
+            const qrbox = Math.min((readerLive?.offsetWidth) || 280, 320);
             const scanConfig = { fps: 10, qrbox };
             const onScan = (decodedText) => {
                 if (!decodedText) return;
@@ -1636,7 +1687,13 @@ function initWorkPage() {
                     if (caps && caps.torch) {
                         qrVideoTrack = track;
                         qrTorchOn = false;
-                        if (qrTorchBtn) {
+                        if (qrOverlayTorchBtn) {
+                            qrOverlayTorchBtn.classList.remove("d-none");
+                            const icon = qrOverlayTorchBtn.querySelector(".bi");
+                            const label = qrOverlayTorchBtn.querySelector("[data-torch-label]");
+                            if (icon) icon.className = "bi bi-flashlight";
+                            if (label) label.textContent = "Фонарик";
+                        } else if (qrTorchBtn) {
                             qrTorchBtn.classList.remove("d-none");
                             qrTorchIcon.className = "bi bi-flashlight";
                             qrTorchLabel.textContent = "Фонарик";
@@ -1674,8 +1731,7 @@ function initWorkPage() {
         const placeCod = normalizePlaceCode(match[0]) || match[0].toUpperCase();
         placeInput.value = placeCod;
         showToastMessage("QR-код считан");
-        qrModalInstance?.hide();
-        stopQrScanner();
+        closeQrOverlay();
         loadPlace(placeCod);
     }
 
@@ -1803,10 +1859,44 @@ function initWorkPage() {
     saveScanBtn?.addEventListener("click", saveScan);
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
-    qrModalEl?.addEventListener("hidden.bs.modal", stopQrScanner);
-    const qrModalFloatClose = document.getElementById("qrModalFloatClose");
-    qrModalFloatClose?.addEventListener("click", () => {
+    qrModalEl?.addEventListener("hidden.bs.modal", () => {
+        stopQrScanner();
+        if (qrOverlayObserver) {
+            qrOverlayObserver.disconnect();
+            qrOverlayObserver = null;
+        }
+    });
+    let qrOverlayObserver = null;
+    qrModalEl?.addEventListener("show.bs.modal", () => {
+        const disableFixedOverlays = () => {
+            const modalEl = document.getElementById("qrModal");
+            Array.from(document.body.children).forEach((el) => {
+                if (el === modalEl || el.classList.contains("modal-backdrop")) return;
+                if (modalEl && el.contains(modalEl)) return;
+                const s = getComputedStyle(el);
+                if (s.position === "fixed") el.style.pointerEvents = "none";
+            });
+            const reader = document.getElementById("qrReader");
+            if (reader) {
+                reader.style.pointerEvents = "none";
+                reader.querySelectorAll("*").forEach((el) => { el.style.pointerEvents = "none"; });
+            }
+        };
+        setTimeout(disableFixedOverlays, 100);
+        setTimeout(disableFixedOverlays, 500);
+        setTimeout(disableFixedOverlays, 2000);
+        qrOverlayObserver = new MutationObserver(() => disableFixedOverlays());
+        qrOverlayObserver.observe(document.body, { childList: true, subtree: true });
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (qrOverlayRoot && document.body.contains(qrOverlayRoot)) {
+            closeQrOverlay();
+            return;
+        }
+        if (!qrModalEl?.classList.contains("show")) return;
         qrModalInstance?.hide();
+        stopQrScanner();
     });
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;

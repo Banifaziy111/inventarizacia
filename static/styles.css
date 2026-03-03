@@ -1932,7 +1932,12 @@ body.modal-open .admin-status-bar {
     opacity: 0.5;
 }
 
-/* QR-модалка: шапка и футер поверх оверлеев библиотеки сканера, область сканера ограничена */
+/* QR-модалка: клики проходят сквозь область сканера к бэкдропу, шапка и футер кликабельны */
+#qrModal,
+#qrModal .modal-dialog,
+#qrModal .modal-content {
+    pointer-events: none;
+}
 #qrModal .modal-content {
     display: flex;
     flex-direction: column;
@@ -1943,6 +1948,10 @@ body.modal-open .admin-status-bar {
     z-index: 20;
     pointer-events: auto;
     background: var(--bg-surface);
+}
+#qrModal .modal-body.qr-modal-body,
+#qrModal .modal-body.qr-modal-body * {
+    pointer-events: none;
 }
 #qrModal .modal-body.qr-modal-body {
     position: relative;
@@ -1963,18 +1972,64 @@ body.modal-open .admin-status-bar {
     max-height: 280px;
 }
 
-/* Плавающая кнопка «Закрыть» поверх всего — на случай оверлея библиотеки сканера */
-.qr-modal-float-close {
+/* Собственный оверлей для QR (без Bootstrap-модалки — гарантированно закрывается) */
+.qr-custom-overlay {
     position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    box-sizing: border-box;
+}
+.qr-custom-overlay__panel {
+    background: var(--bg-surface);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    max-width: 100%;
+    width: 100%;
+    max-width: 380px;
+    padding: 1rem 1.25rem;
+    position: relative;
+    pointer-events: auto;
+}
+.qr-custom-overlay__close {
+    position: absolute;
     top: 0.75rem;
     right: 0.75rem;
-    z-index: 1100;
-    padding: 0.5rem 0.75rem;
-    font-weight: 600;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 10;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.875rem;
 }
-#qrModal.show .qr-modal-float-close {
-    display: inline-flex !important;
+.qr-custom-overlay__title {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+}
+.qr-custom-overlay__reader {
+    width: 100%;
+    min-height: 200px;
+    max-height: 280px;
+    overflow: hidden;
+    border-radius: var(--radius);
+    background: #000;
+    pointer-events: none;
+}
+.qr-custom-overlay__reader * {
+    pointer-events: none;
+}
+.qr-custom-overlay__status {
+    display: block;
+    text-align: center;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+}
+.qr-custom-overlay__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
 }
 
 .modal-content {
