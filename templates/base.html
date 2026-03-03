@@ -7,6 +7,9 @@
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>{% block title %}Инвентаризация{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=9">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
     {% block head_extra %}{% endblock %}
@@ -81,7 +84,7 @@
 
 <footer class="app-footer py-3">
     <div class="container text-center px-3">
-        Инвентаризация мест хранения
+        <span class="footer-brand"><i class="bi bi-box-seam"></i> Инвентаризация мест хранения</span>
     </div>
 </footer>
 

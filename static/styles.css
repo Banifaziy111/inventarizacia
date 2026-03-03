@@ -3,11 +3,12 @@
    Складская тема, читаемость, мобильность
    ======================================== */
 
-/* Шрифт: локально без зависимости от интернета; при наличии сети можно раскомментировать @import для Manrope */
-/* @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap'); */
+/* Основной шрифт: Merriweather (подключается в base.html) */
 :root {
     /* Pantone: 675C (primary), 2395C (fuchsia), 254C (purple), 2617C (dark purple) */
-    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-sans: 'Merriweather', Georgia, serif;
+    --font-heading: var(--font-sans);
+    --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
     --primary: #6E2B62;
     --primary-hover: #5A2352;
     --primary-light: rgba(110, 43, 98, 0.12);
@@ -107,6 +108,19 @@
 [data-theme="dark"] .form-control:focus {
     background: var(--bg-elevated);
     color: var(--text-primary);
+}
+
+[data-theme="dark"] #dashboardBlockErrorsEmpty {
+    color: var(--text-secondary);
+}
+
+#dashboardBlockErrorsEmpty .empty-state-icon {
+    font-size: 3rem;
+    opacity: 0.7;
+}
+
+#dashboardBlockErrorsEmpty p:first-of-type {
+    font-size: 1rem;
 }
 
 [data-theme="dark"] #dashboardBlockErrorsEmpty,
@@ -231,6 +245,7 @@ main, .app-header, .app-footer {
 
 /* Заголовки с градиентом и буквенным интервалом */
 .heading-gradient {
+    font-family: var(--font-heading);
     background: var(--gradient-primary-h);
     -webkit-background-clip: text;
     background-clip: text;
@@ -241,11 +256,27 @@ main, .app-header, .app-footer {
 h1.heading-gradient { font-size: 1.5rem; }
 h2.heading-gradient { font-size: 1.25rem; }
 
+@media (min-width: 768px) {
+    h1.heading-gradient { font-size: 1.65rem; }
+}
+
 /* ========== LAYOUT ========== */
 .app-header {
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow);
+    position: relative;
+}
+
+.app-header::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--gradient-primary-h);
+    opacity: 0.85;
 }
 
 .app-header .navbar-brand {
@@ -268,6 +299,17 @@ main {
     color: var(--text-muted);
     font-size: 0.8rem;
     opacity: 0.92;
+}
+
+.app-footer .footer-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.app-footer .footer-brand i {
+    opacity: 0.8;
+    color: var(--primary);
 }
 
 /* ========== CARDS ========== */
@@ -310,6 +352,7 @@ main {
     background: var(--gradient-primary);
     border: none;
     color: #fff;
+    box-shadow: 0 2px 8px rgba(110, 43, 98, 0.25);
 }
 
 .btn-primary:hover {
@@ -317,7 +360,7 @@ main {
     filter: brightness(1.05);
     color: #fff;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(110, 43, 98, 0.35);
+    box-shadow: 0 4px 14px rgba(110, 43, 98, 0.4);
 }
 
 .btn-success:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3); }
@@ -733,6 +776,11 @@ body[data-theme="dark"] .theme-icon-moon {
 /* ========== TABLES ========== */
 .table {
     --bs-table-bg: transparent;
+}
+
+.table thead th {
+    border-bottom: 2px solid var(--border-strong);
+    font-weight: 600;
 }
 
 .table-light {
@@ -1607,27 +1655,104 @@ body.scan-only-mode .scan-only-only {
 }
 
 /* ========== ADMIN ========== */
+.admin-page {
+    padding-bottom: 1.5rem;
+}
+
 .admin-header .btn { white-space: nowrap; }
 
-/* Шапка админки: акцентная полоска снизу */
-.admin-header--bar {
-    padding-bottom: 1rem;
+/* Шапка админки: карточка с градиентной полоской */
+.admin-header--card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    padding: 1.25rem 1.5rem;
     position: relative;
+    overflow: hidden;
 }
-.admin-header--bar::after {
+
+.admin-header--card::before {
     content: "";
     position: absolute;
     left: 0;
-    right: 0;
+    top: 0;
     bottom: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent 0%, var(--primary) 15%, var(--accent) 50%, var(--primary) 85%, transparent 100%);
-    opacity: 0.6;
-    border-radius: 1px;
+    width: 4px;
+    background: var(--gradient-primary);
+    opacity: 0.9;
 }
-.admin-title { font-size: 1.35rem; }
+
+.admin-header-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    position: relative;
+    z-index: 1;
+}
+
+.admin-header-title-block {
+    min-width: 0;
+}
+
+.admin-header-period {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.admin-header-primary-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+@media (max-width: 767.98px) {
+    .admin-header--card {
+        padding: 1rem;
+    }
+    .admin-header-inner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .admin-header-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    .admin-header-period {
+        width: 100%;
+    }
+    .admin-header-period .form-select {
+        flex: 1;
+        max-width: none;
+    }
+}
+
+.admin-title { font-size: 1.4rem; }
 .admin-subtitle { opacity: 0.9; }
 .admin-header-actions .btn { border-radius: var(--radius-sm); }
+
+/* Метки секций дашборда */
+.admin-section-label {
+    letter-spacing: 0.05em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Пустые состояния в таблицах и списках */
+.admin-empty-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.admin-empty-inline .bi { font-size: 1.25rem; }
+
+.admin-empty-list {
+    padding: 0.75rem 1rem !important;
+    color: var(--text-muted) !important;
+}
 
 /* KPI-карточки: цветная полоска слева и крупные числа */
 .admin-kpi-card {
@@ -1644,6 +1769,14 @@ body.scan-only-mode .scan-only-only {
     box-shadow: var(--shadow-md);
 }
 .admin-kpi-card .card-body { padding: 0.75rem 1rem; }
+
+.admin-kpi-card .small.text-muted {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.95;
+}
+
 .admin-kpi-icon {
     width: 2.75rem;
     height: 2.75rem;
@@ -1653,6 +1786,15 @@ body.scan-only-mode .scan-only-only {
     transition: transform 0.2s;
     font-size: 1.15rem;
 }
+
+@media (min-width: 768px) {
+    .admin-kpi-icon {
+        width: 3rem;
+        height: 3rem;
+        font-size: 1.35rem;
+    }
+}
+
 .admin-kpi-card:hover .admin-kpi-icon { transform: scale(1.05); }
 .admin-kpi-value {
     font-size: 1.35rem;
@@ -1683,7 +1825,20 @@ body.scan-only-mode .scan-only-only {
 .admin-widget .card-header {
     padding: 0.75rem 1rem;
     font-weight: 600;
+    border-left: 3px solid var(--primary);
+    background: var(--bg-page);
 }
+
+[data-theme="dark"] .admin-widget .card-header {
+    background: var(--bg-elevated);
+}
+
+.admin-widget .card-header .h6 {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
 .admin-widget-body {
     min-height: 0;
 }
@@ -1715,14 +1870,16 @@ body.scan-only-mode .scan-only-only {
 }
 
 /* Боковая колонка админки: лёгкий фон и группировка */
-.admin-sidebar {
-    background: linear-gradient(180deg, transparent 0%, var(--bg-page) 2%, var(--bg-page) 98%, transparent 100%);
+.admin-widgets-stack.admin-sidebar {
+    background: linear-gradient(180deg, var(--bg-page) 0%, var(--bg-surface) 100%);
     border-radius: var(--radius-lg);
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
 }
-[data-theme="dark"] .admin-sidebar {
-    background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.15) 2%, rgba(0,0,0,0.15) 98%, transparent 100%);
+
+[data-theme="dark"] .admin-widgets-stack.admin-sidebar {
+    background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-surface) 100%);
+    border-color: var(--border);
 }
 
 /* Карточка графика: больше высоты на мобильных */
@@ -1734,14 +1891,19 @@ body.scan-only-mode .scan-only-only {
 }
 
 /* Нижний статус-бар: визуальное выделение */
-.admin-status-bar-visible {
+.admin-status-bar.admin-status-bar-visible {
     background: var(--bg-elevated);
-    border-top: 2px solid var(--border);
-    border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--primary);
 }
-.admin-status-bar-visible .card-body {
-    border-radius: 0 0 var(--radius) var(--radius);
+
+.admin-status-bar .card-body {
+    border-radius: var(--radius);
+}
+
+.admin-status-bar .badge {
+    font-size: 0.75rem;
+    font-weight: 600;
 }
 
 /* Модалки в админке: градиентная полоска под заголовком */
@@ -1833,6 +1995,13 @@ body.scan-only-mode .scan-only-only {
 
 .empty-state-block .empty-state-icon {
     font-size: 3.5rem;
+}
+
+/* Код МХ в карточке — крупнее, моноширинный */
+.place-card-mx #placeTitle {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    letter-spacing: 0.02em;
 }
 
 .place-card-mx .info-block {
