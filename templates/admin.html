@@ -8,76 +8,86 @@
 
 {% block content %}
 <div class="admin-page content-fade-in">
-    <header class="admin-header mb-4">
+    <header class="admin-header admin-header--bar mb-4">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div>
-                <h1 class="h4 mb-0 fw-bold heading-gradient">Админ-панель</h1>
-                <p class="text-muted small mb-0 mt-1">Ошибки по складам, выгрузки, аналитика</p>
+                <h1 class="admin-title mb-0 fw-bold heading-gradient">Админ-панель</h1>
+                <p class="admin-subtitle text-muted small mb-0 mt-1"><i class="bi bi-bar-chart-line me-1"></i>Ошибки по складам, выгрузки, аналитика</p>
             </div>
-            <div class="d-flex gap-2 align-items-center">
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshAdminBtn" title="Обновить данные">
-                <i class="bi bi-arrow-clockwise me-1"></i>Обновить
-            </button>
-            <button type="button" class="btn btn-primary btn-sm" id="exportBtn" data-bs-toggle="modal" data-bs-target="#reportsModal">
-                <i class="bi bi-file-earmark-arrow-down me-1"></i>Сохранённые отчёты
-            </button>
+            <div class="admin-header-actions d-flex flex-wrap gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="adminPeriodSelect" style="max-width:140px" title="Период для KPI и графиков">
+                    <option value="today">Сегодня</option>
+                    <option value="7d" selected>7 дней</option>
+                    <option value="30d">30 дней</option>
+                </select>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshAdminBtn" title="Обновить данные">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Обновить
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="exportEmployeesBtn" title="Скачать сводку по сотрудникам">
+                    <i class="bi bi-people me-1"></i>Сводка по сотрудникам
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="exportBtn" data-bs-toggle="modal" data-bs-target="#reportsModal">
+                    <i class="bi bi-file-earmark-arrow-down me-1"></i>Сохранённые отчёты
+                </button>
             </div>
         </div>
     </header>
 
-    <!-- KPI — компактная строка -->
-    <section class="admin-kpi mb-4">
-        <div class="row g-2 g-md-3">
+    <!-- Дашборд: сетка виджетов -->
+    <div class="admin-dashboard-grid">
+    <!-- KPI — первая строка -->
+    <section class="admin-kpi admin-widgets-row">
+        <div class="row g-3">
             <div class="col-6 col-md-3">
-                <div class="card admin-kpi-card h-100">
-                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                <div class="card admin-widget admin-kpi-card admin-kpi-card--primary h-100">
+                    <div class="card-body py-3 py-md-3 d-flex align-items-center gap-3">
                         <div class="admin-kpi-icon bg-primary bg-opacity-10 rounded-2 p-2 flex-shrink-0">
                             <i class="bi bi-qr-code-scan text-primary"></i>
                         </div>
                         <div class="min-w-0">
-                            <div class="small text-muted">Сканов сегодня</div>
-                            <div class="h5 mb-0 fw-bold" id="overallScannedValue">—</div>
-                            <span class="badge bg-success bg-opacity-10 text-success small" id="weeklyDelta">—</span>
+                            <div class="small text-muted mb-0">Сканов сегодня</div>
+                            <div class="admin-kpi-value fw-bold mt-1" id="overallScannedValue">—</div>
+                            <span class="badge bg-success bg-opacity-10 text-success small mt-1" id="weeklyDelta">—</span>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="card admin-kpi-card h-100">
-                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                <div class="card admin-widget admin-kpi-card admin-kpi-card--danger h-100">
+                    <div class="card-body py-3 py-md-3 d-flex align-items-center gap-3">
                         <div class="admin-kpi-icon bg-danger bg-opacity-10 rounded-2 p-2 flex-shrink-0">
                             <i class="bi bi-exclamation-triangle-fill text-danger"></i>
                         </div>
                         <div class="min-w-0">
-                            <div class="small text-muted">Расхождения</div>
-                            <div class="h5 mb-0 fw-bold text-danger" id="overallDiscrepancyValue">—</div>
-                            <div class="small text-muted" id="overallAccuracyLabel">—</div>
+                            <div class="small text-muted mb-0">Расхождения</div>
+                            <div class="admin-kpi-value fw-bold text-danger mt-1" id="overallDiscrepancyValue">—</div>
+                            <div class="small text-muted mt-0" id="overallAccuracyLabel">—</div>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="card admin-kpi-card h-100">
-                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                <div class="card admin-widget admin-kpi-card admin-kpi-card--success h-100">
+                    <div class="card-body py-3 py-md-3 d-flex align-items-center gap-3">
                         <div class="admin-kpi-icon bg-success bg-opacity-10 rounded-2 p-2 flex-shrink-0">
                             <i class="bi bi-people-fill text-success"></i>
                         </div>
                         <div class="min-w-0">
-                            <div class="small text-muted">Сотрудники</div>
-                            <div class="h5 mb-0 fw-bold" id="overallEmployeesValue">—</div>
+                            <div class="small text-muted mb-0">Сотрудники</div>
+                            <div class="admin-kpi-value fw-bold mt-1" id="overallEmployeesValue">—</div>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="card admin-kpi-card h-100">
-                    <div class="card-body py-2 py-md-3 d-flex align-items-center gap-2">
+                <div class="card admin-widget admin-kpi-card admin-kpi-card--info h-100">
+                    <div class="card-body py-3 py-md-3 d-flex align-items-center gap-3">
                         <div class="admin-kpi-icon bg-info bg-opacity-10 rounded-2 p-2 flex-shrink-0">
                             <i class="bi bi-box-seam text-info"></i>
                         </div>
                         <div class="min-w-0">
-                            <div class="small text-muted">Уникальные МХ</div>
-                            <div class="h5 mb-0 fw-bold" id="overallPlacesValue">—</div>
+                            <div class="small text-muted mb-0">Уникальные МХ</div>
+                            <div class="admin-kpi-value fw-bold mt-1" id="overallPlacesValue">—</div>
                         </div>
                     </div>
                 </div>
@@ -85,65 +95,108 @@
         </div>
     </section>
 
-    <hr class="section-divider">
-
-    <div class="row g-4">
-        <!-- Основная колонка: ошибки по блоку + график -->
-        <div class="col-lg-8">
-            <section class="mb-4">
-                <div class="card">
-                    <div class="card-header py-2 d-flex flex-wrap align-items-center gap-2">
-                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-exclamation-diamond me-1"></i>Ошибки по блоку</h2>
-                        <select class="form-select form-select-sm" id="dashboardBlockErrorsSelect" style="max-width:200px">
-                            <option value="">Выберите склад</option>
-                        </select>
-                        <button type="button" class="btn btn-primary btn-sm" id="dashboardExportBlockBtn" title="Скачать Excel">
-                            <i class="bi bi-download me-1"></i>Скачать Excel
-                        </button>
-                    </div>
-                    <div class="card-body p-0">
-                        <div id="dashboardBlockErrorsEmpty" class="text-center py-5 px-3">
-                            <i class="bi bi-building text-muted d-block mb-2" style="font-size:2rem"></i>
-                            <p class="text-muted mb-0 small">Выберите склад в выпадающем списке выше</p>
-                        </div>
-                        <div id="dashboardBlockErrorsTableWrap" class="d-none">
-                            <p class="small text-muted px-3 pt-2 mb-0">Исправленные места не попадают в выгрузку. Меняйте статус в таблице.</p>
-                            <div class="table-responsive overflow-auto" style="max-height:340px">
-                                <table class="table table-sm table-hover align-middle mb-0">
-                                    <thead class="table-light sticky-top">
-                                        <tr>
-                                            <th>Код МХ / ID</th>
-                                            <th>Этаж</th>
-                                            <th>Ряд</th>
-                                            <th>Секция</th>
-                                            <th>Статус</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="dashboardBlockErrorsBody"></tbody>
-                                </table>
-                            </div>
-                            <p class="small text-muted mb-0 px-3 py-2" id="dashboardBlockErrorsCount"></p>
-                        </div>
-                    </div>
+    <!-- Графики: вторая строка, две карточки одной высоты -->
+    <div class="row g-3 admin-widgets-row">
+        <div class="col-lg-6">
+            <div class="card admin-widget h-100">
+                <div class="card-header py-2">
+                    <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-graph-up me-1"></i>Динамика за период</h2>
                 </div>
-            </section>
-
-            <section class="mb-4">
-                <div class="card chart-card">
-                    <div class="card-header py-2">
-                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-graph-up me-1"></i>Динамика за 7 дней</h2>
-                    </div>
-                    <div class="card-body py-3 chart-card-body">
-                        <canvas id="dailyChart" height="180" aria-label="График сканов"></canvas>
-                    </div>
+                <div class="card-body py-3 chart-card-body admin-chart-body admin-widget-body">
+                    <canvas id="dailyChart" height="180" aria-label="График сканов"></canvas>
                 </div>
-            </section>
+            </div>
         </div>
+        <div class="col-lg-6">
+            <div class="card admin-widget h-100">
+                <div class="card-header py-2">
+                    <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-clock-history me-1"></i>Почасово за 24 ч</h2>
+                </div>
+                <div class="card-body py-3 chart-card-body admin-chart-body admin-widget-body">
+                    <canvas id="hourlyChart" height="160" aria-label="График по часам"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        <!-- Боковая колонка: типы расхождений, фото, журнал -->
+    <!-- Проблемные МХ + Тикеты: третья строка -->
+    <div class="row g-3 admin-widgets-row">
+        <div class="col-lg-6">
+            <div class="card admin-widget h-100" id="problemZonesBlock">
+                <div class="card-header py-2">
+                    <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-geo-alt me-1"></i>Проблемные МХ</h2>
+                </div>
+                <div class="card-body p-0 admin-widget-body">
+                    <div class="table-responsive overflow-auto admin-widget-scroll">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr><th>МХ</th><th class="text-center">Сканов</th><th class="text-center">Ошибок</th></tr>
+                            </thead>
+                            <tbody id="problemZonesTableBody">
+                                <tr><td colspan="3" class="text-center text-muted py-3">Нет данных</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card admin-widget h-100">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-ticket-perforated me-1"></i>Последние тикеты</h2>
+                    <span class="badge bg-secondary" id="ticketsCountBadge">0</span>
+                </div>
+                <div class="card-body py-2 overflow-auto admin-widget-body admin-widget-scroll" id="ticketsBlock">
+                    <div id="ticketsBoard">Загрузка…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ошибки по складу (wh_id из перечня МХ); в таблице коды МХ — блок Э6, Э10 и т.д. -->
+    <div class="row g-3 admin-widgets-row">
+        <div class="col-lg-8">
+            <div class="card admin-widget h-100">
+                <div class="card-header py-2 d-flex flex-wrap align-items-center gap-2">
+                    <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-exclamation-diamond me-1"></i>Ошибки по складу</h2>
+                    <select class="form-select form-select-sm" id="dashboardBlockErrorsSelect" style="max-width:200px" title="Склад = WH ID из перечня МХ (133, 279, 335…)">
+                        <option value="">Выберите склад</option>
+                    </select>
+                    <span class="small text-muted" title="Блок — префикс кода МХ в таблице: Э + номер">В таблице блок: Э6, Э10…</span>
+                    <button type="button" class="btn btn-primary btn-sm" id="dashboardExportBlockBtn" title="Скачать Excel">
+                        <i class="bi bi-download me-1"></i>Скачать Excel
+                    </button>
+                </div>
+                <div class="card-body p-0 admin-widget-body">
+                    <div id="dashboardBlockErrorsEmpty" class="empty-state-block text-center py-5 px-4">
+                        <i class="bi bi-building empty-state-icon d-block mb-3 text-primary" aria-hidden="true"></i>
+                        <p class="text-muted mb-1 fw-semibold">Выберите склад</p>
+                        <p class="text-muted mb-0 small">Склад — WH ID из перечня МХ (133, 279…). Блок кода МХ — буква Э и номер (Э6, Э10).</p>
+                    </div>
+                    <div id="dashboardBlockErrorsTableWrap" class="d-none">
+                        <p class="small text-muted px-3 pt-2 mb-0">Код МХ: блок Э + номер (напр. Э6.01.01.01). Исправленные места не попадают в выгрузку.</p>
+                        <div class="table-responsive overflow-auto admin-widget-scroll admin-widget-scroll--lg">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>Код МХ / ID</th>
+                                        <th>Этаж</th>
+                                        <th>Ряд</th>
+                                        <th>Секция</th>
+                                        <th>Статус</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashboardBlockErrorsBody"></tbody>
+                            </table>
+                        </div>
+                        <p class="small text-muted mb-0 px-3 py-2" id="dashboardBlockErrorsCount"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="col-lg-4">
-            <section class="mb-4">
-                <div class="card">
+            <div class="admin-widgets-stack">
+                <div class="card admin-widget">
                     <div class="card-header py-2">
                         <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-pie-chart me-1"></i>Типы расхождений</h2>
                     </div>
@@ -153,36 +206,64 @@
                         </div>
                     </div>
                 </div>
-            </section>
 
-            <section class="mb-4">
-                <div class="card">
+                <div class="card admin-widget">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center">
                         <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-camera me-1"></i>Фотофиксации</h2>
                         <span class="badge bg-info" id="photoGalleryCount">0</span>
                     </div>
-                    <div class="card-body py-2 overflow-auto" style="max-height:200px">
+                    <div class="card-body py-2 overflow-auto admin-widget-scroll">
                         <div id="adminPhotoGrid" class="photo-grid small">Нет фото</div>
                     </div>
                 </div>
-            </section>
 
-            <section class="mb-4">
-                <div class="card">
+                <div class="card admin-widget">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center">
                         <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-journal-text me-1"></i>Журнал событий</h2>
                         <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="clearAdminLog">Очистить</button>
                     </div>
-                    <div class="card-body py-2 overflow-auto small text-muted" style="max-height:200px">
+                    <div class="card-body py-2 overflow-auto small text-muted admin-widget-scroll">
                         <div id="adminActivityList">Нет событий</div>
                     </div>
                 </div>
-            </section>
+
+                <div class="card admin-widget">
+                    <div class="card-header py-2">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-people-fill me-1"></i>Топ сотрудников</h2>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive overflow-auto admin-widget-scroll">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr><th>Бэйдж</th><th class="text-center">Сканов</th><th class="text-center">Точность</th><th class="text-center">ч</th></tr>
+                                </thead>
+                                <tbody id="employeesTableBody">
+                                    <tr><td colspan="4" class="text-center text-muted py-3">Нет данных</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card admin-widget">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <h2 class="h6 mb-0 fw-semibold"><i class="bi bi-clipboard-check me-1"></i>Ревизии качества</h2>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="openQualityReviewModalBtn" data-bs-toggle="modal" data-bs-target="#qualityReviewModal">Создать</button>
+                    </div>
+                    <div class="card-body py-2 overflow-auto p-0 admin-widget-scroll">
+                        <div id="qualityReviewList" class="list-group list-group-flush list-group-sm">
+                            <div class="list-group-item text-muted small">Нет данных</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
+    </div>
+    </div>
 
-    <aside id="adminStatusBar" class="d-none card border-0 rounded-0 mt-2">
-        <div class="card-body py-2 px-3 d-flex flex-wrap justify-content-between align-items-center gap-2 small">
+    <aside id="adminStatusBar" class="d-none admin-status-bar-visible card border-0 rounded-3 rounded-top mt-2 shadow-sm">
+        <div class="card-body py-3 px-4 d-flex flex-wrap justify-content-between align-items-center gap-2 small">
             <span id="adminStatusBarText">—</span>
             <div class="d-flex gap-1">
                 <span class="badge bg-success" id="adminStatusChipAccuracy">—</span>
@@ -192,14 +273,20 @@
         </div>
     </aside>
 </div>
+{% endblock %}
 
+{% block modals %}
+<!-- Модалки админки рендерятся в body, чтобы не перекрывались контейнером и не блокировались -->
 <!-- Модальное окно: сохранённые отчёты -->
-<div class="modal fade" id="reportsModal" tabindex="-1">
+<div class="modal fade" id="reportsModal" tabindex="-1" aria-labelledby="reportsModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Сохранённые отчёты</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            <div class="modal-header modal-header--accent d-flex align-items-center justify-content-between">
+                <h5 class="modal-title" id="reportsModalTitle">Сохранённые отчёты</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
             </div>
             <div class="modal-body">
                 <div class="table-responsive">
@@ -223,11 +310,48 @@
     </div>
 </div>
 
+<!-- Модальное окно: создать ревизию качества -->
+<div class="modal fade" id="qualityReviewModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header modal-header--accent">
+                <h5 class="modal-title">Новая ревизия качества</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <form id="qualityReviewForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="reviewZone">Зона (префикс)</label>
+                        <input type="text" class="form-control" id="reviewZone" name="reviewZone" placeholder="Э6 или Э10" required>
+                        <div class="form-text small">После буквы Э указывается номер блока (Э6, Э10).</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="reviewStatus">Статус</label>
+                        <select class="form-select" id="reviewStatus" name="reviewStatus">
+                            <option value="planned">Запланировано</option>
+                            <option value="in_progress">В работе</option>
+                            <option value="completed">Выполнено</option>
+                        </select>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label" for="reviewSummary">Комментарий</label>
+                        <textarea class="form-control" id="reviewSummary" name="reviewSummary" rows="2" placeholder="По необходимости"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Создать ревизию</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Модальное окно: просмотр фото -->
 <div class="modal fade" id="photoPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header modal-header--accent">
                 <h5 class="modal-title" id="photoPreviewModalLabel">Фото</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>

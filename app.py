@@ -499,6 +499,14 @@ def admin_dashboard():
     return render_template('admin.html')
 
 
+@app.route('/logout')
+def logout():
+    """Выход сотрудника: сброс cookie и редирект на страницу входа."""
+    response = redirect('/')
+    response.set_cookie('employee_badge', '', max_age=0)
+    return response
+
+
 @app.route('/api/auth', methods=['POST'])
 def auth():
     """Авторизация по бэйджу сотрудника или администратора."""
@@ -2102,18 +2110,30 @@ def sync_data():
         return jsonify({'error': str(e)}), 500
 
 
+def _admin_period_dates():
+    """Возвращает (date_from, date_to) для периода из request.args (period=today|7d|30d)."""
+    period = request.args.get('period', '7d')
+    date_to = datetime.now().date() + timedelta(days=1)
+    if period == 'today':
+        date_from = datetime.now().date()
+    elif period == '30d':
+        date_from = date_to - timedelta(days=30)
+    else:
+        date_from = date_to - timedelta(days=7)
+    return date_from, date_to
+
+
 @app.route('/api/admin/analytics', methods=['GET'])
 def get_admin_analytics():
     """Получить данные для графиков."""
-    # Проверка авторизации
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
-    
+
+    date_from, date_to = _admin_period_dates()
     try:
         conn = get_db()
         with conn.cursor() as cur:
-            # Динамика по дням (последние 7 дней)
             cur.execute("""
                 SELECT 
                     DATE(created_at) as date,
@@ -2121,10 +2141,10 @@ def get_admin_analytics():
                     SUM(CASE WHEN has_discrepancy THEN 1 ELSE 0 END) as errors,
                     SUM(CASE WHEN NOT has_discrepancy THEN 1 ELSE 0 END) as ok
                 FROM inventory_results
-                WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+                WHERE created_at >= %s AND created_at < %s
                 GROUP BY DATE(created_at)
                 ORDER BY date
-            """)
+            """, (date_from, date_to))
             daily_stats = []
             for row in cur.fetchall():
                 daily_stats.append({
@@ -2141,11 +2161,12 @@ def get_admin_analytics():
                     COUNT(*) as total,
                     SUM(CASE WHEN NOT has_discrepancy THEN 1 ELSE 0 END) as ok
                 FROM inventory_results
+                WHERE created_at >= %s AND created_at < %s
                 GROUP BY badge
                 HAVING COUNT(*) >= 10
                 ORDER BY badge
                 LIMIT 200
-            """)
+            """, (date_from, date_to))
             accuracy_stats = []
             for row in cur.fetchall():
                 accuracy = round((row['ok'] / row['total']) * 100, 1) if row['total'] > 0 else 0
@@ -2162,11 +2183,12 @@ def get_admin_analytics():
                     COUNT(*) as scan_count,
                     SUM(CASE WHEN has_discrepancy THEN 1 ELSE 0 END) as error_count
                 FROM inventory_results
+                WHERE created_at >= %s AND created_at < %s
                 GROUP BY place_cod, place_name
                 HAVING SUM(CASE WHEN has_discrepancy THEN 1 ELSE 0 END) > 0
                 ORDER BY error_count DESC, scan_count DESC
                 LIMIT 20
-            """)
+            """, (date_from, date_to))
             problem_zones = []
             for row in cur.fetchall():
                 problem_zones.append({
@@ -2191,16 +2213,15 @@ def get_admin_analytics():
 
 @app.route('/api/admin/stats', methods=['GET'])
 def get_admin_stats():
-    """Получить общую статистику для админ-панели."""
-    # Проверка авторизации
+    """Получить общую статистику для админ-панели. Параметр period: today|7d|30d."""
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
-    
+
+    date_from, date_to = _admin_period_dates()
     try:
         conn = get_db()
         with conn.cursor() as cur:
-            # Общая статистика
             cur.execute("""
                 SELECT 
                     COUNT(*) as total_scanned,
@@ -2209,10 +2230,10 @@ def get_admin_stats():
                     SUM(CASE WHEN NOT has_discrepancy THEN 1 ELSE 0 END) as no_discrepancy,
                     COUNT(DISTINCT place_cod) as unique_places
                 FROM inventory_results
-            """)
+                WHERE created_at >= %s AND created_at < %s
+            """, (date_from, date_to))
             overall = dict(cur.fetchone())
-            
-            # Статистика по сотрудникам (ТОП 20 по количеству сканов)
+
             cur.execute("""
                 SELECT 
                     badge,
@@ -2221,10 +2242,11 @@ def get_admin_stats():
                     MIN(created_at) as first_scan,
                     MAX(created_at) as last_scan
                 FROM inventory_results
+                WHERE created_at >= %s AND created_at < %s
                 GROUP BY badge
                 ORDER BY scanned DESC
                 LIMIT 20
-            """)
+            """, (date_from, date_to))
             
             employee_rows = cur.fetchall()
             badges = [row['badge'] for row in employee_rows]
@@ -2263,16 +2285,16 @@ def get_admin_stats():
                     'last_scan': row['last_scan'].isoformat() if row['last_scan'] else None
                 })
             
-            # Статистика по причинам расхождений (как выбирают сотрудники при скане)
+            # Статистика по причинам расхождений
             cur.execute("""
                 SELECT 
                     COALESCE(NULLIF(TRIM(discrepancy_reason), ''), NULL) AS reason_raw,
                     COUNT(*) AS count
                 FROM inventory_results
-                WHERE has_discrepancy = TRUE
+                WHERE has_discrepancy = TRUE AND created_at >= %s AND created_at < %s
                 GROUP BY NULLIF(TRIM(discrepancy_reason), '')
                 ORDER BY count DESC
-            """)
+            """, (date_from, date_to))
             discrepancy_types = []
             for row in cur.fetchall():
                 reason = row['reason_raw']
@@ -3009,6 +3031,78 @@ def export_block_errors():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/export/employees', methods=['GET'])
+def export_employees():
+    """Выгрузка сводки по сотрудникам (Excel). Параметр period: today|7d|30d."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+
+    date_from, date_to = _admin_period_dates()
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    badge,
+                    COUNT(*) as scanned,
+                    SUM(CASE WHEN has_discrepancy THEN 1 ELSE 0 END) as discrepancies,
+                    MIN(created_at) as first_scan,
+                    MAX(created_at) as last_scan
+                FROM inventory_results
+                WHERE created_at >= %s AND created_at < %s
+                GROUP BY badge
+                ORDER BY scanned DESC
+            """, (date_from, date_to))
+            rows = cur.fetchall()
+        badges = [r['badge'] for r in rows]
+        durations = {}
+        if badges:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT badge, COALESCE(SUM(session_duration), 0) AS total_seconds
+                    FROM user_sessions
+                    WHERE badge = ANY(%s) AND session_duration IS NOT NULL
+                    GROUP BY badge
+                """, (badges,))
+                for d in cur.fetchall():
+                    durations[d['badge']] = d['total_seconds'] or 0
+
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Сотрудники"
+        headers = ["Бэйдж", "Сканов", "Расхождений", "Точность %", "Часов", "Сканов/час", "Первый скан", "Последний скан"]
+        ws.append(headers)
+        for c in ws[1]:
+            c.font = Font(bold=True)
+            c.fill = PatternFill(start_color="6E2B62", end_color="6E2B62", fill_type="solid")
+            c.font = Font(bold=True, color="FFFFFF")
+        for row in rows:
+            badge = row['badge']
+            scanned = row['scanned']
+            disc = row['discrepancies']
+            acc = round((1 - disc / scanned) * 100, 1) if scanned else 100
+            sec = durations.get(badge, 0)
+            hours = round(sec / 3600, 1)
+            speed = round(scanned / (hours or 0.01), 1)
+            first_scan = row['first_scan'].strftime("%Y-%m-%d %H:%M") if row.get('first_scan') else ""
+            last_scan = row['last_scan'].strftime("%Y-%m-%d %H:%M") if row.get('last_scan') else ""
+            ws.append([badge, scanned, disc, acc, hours, speed, first_scan, last_scan])
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        period = request.args.get('period', '7d')
+        name = f"employees_{period}_{date_from}_{date_to}.xlsx"
+        return send_file(out, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=name)
+    except Exception as e:
+        logger.exception("Ошибка выгрузки сводки по сотрудникам")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/reviews', methods=['GET'])
 def get_quality_reviews():
     admin_badge = request.cookies.get('admin_badge')
@@ -3121,9 +3215,13 @@ def download_report(report_id):
             row = cur.fetchone()
             if not row:
                 return jsonify({'error': 'Отчет не найден'}), 404
-            
-            file_data = bytes(row['file_data'])
-            filename = row['filename']
+
+            raw_data = row['file_data']
+            if raw_data is None or (hasattr(raw_data, '__len__') and len(raw_data) == 0):
+                return jsonify({'error': 'Файл отчёта отсутствует'}), 404
+
+            file_data = bytes(raw_data)
+            filename = row['filename'] or f'report_{report_id}.xlsx'
             
             # Отмечаем скачивание
             cur.execute("""

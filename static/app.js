@@ -127,7 +127,7 @@ const OfflineQueue = {
 
 async function syncOfflineQueue() {
     const queue = OfflineQueue.getAll();
-    if (!queue.length || !navigator.onLine) return;
+    if (!queue.length || !navigator.onLine) return 0;
     const remaining = [];
     for (const item of queue) {
         try {
@@ -145,6 +145,7 @@ async function syncOfflineQueue() {
     }
     OfflineQueue.set(remaining);
     if (remaining.length === 0) OfflineQueue.clear();
+    return queue.length - remaining.length;
 }
 
 const API = {
@@ -216,9 +217,15 @@ function hideAlert(element) {
     element.classList.remove("alert-animate");
 }
 
+const TOAST_MAX_VISIBLE = 3;
+const TOAST_DELAY_MS = { success: 4500, info: 5000, warning: 5500, danger: 6000 };
+
 function showToastMessage(message, type = "success") {
     const container = document.getElementById("toastContainer");
     if (!container || typeof bootstrap === "undefined") return;
+    while (container.children.length >= TOAST_MAX_VISIBLE && container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
     const icons = {
         success: "bi-check-circle-fill",
         danger: "bi-x-circle-fill",
@@ -228,16 +235,18 @@ function showToastMessage(message, type = "success") {
     const toast = document.createElement("div");
     toast.className = `toast toast-visual align-items-center text-bg-${type} border-0`;
     toast.role = "alert";
+    toast.setAttribute("aria-live", type === "danger" || type === "warning" ? "assertive" : "polite");
     toast.innerHTML = `
-        <div class="d-flex">
-            <div class="toast-body">
-                <i class="bi ${icons[type] || icons.info}"></i>
+        <div class="d-flex align-items-center w-100">
+            <div class="toast-body flex-grow-1">
+                <i class="bi ${icons[type] || icons.info} me-2"></i>
                 <span>${message}</span>
             </div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            <button type="button" class="btn-close btn-close-white flex-shrink-0" data-bs-dismiss="toast" aria-label="Закрыть"></button>
         </div>`;
     container.appendChild(toast);
-    const bsToast = new bootstrap.Toast(toast, { delay: 3000 });
+    const delay = TOAST_DELAY_MS[type] || TOAST_DELAY_MS.success;
+    const bsToast = new bootstrap.Toast(toast, { delay });
     toast.addEventListener("hidden.bs.toast", () => toast.remove());
     bsToast.show();
 }
@@ -247,6 +256,30 @@ function applyTheme(theme) {
     if (!body) return;
     body.dataset.theme = theme;
     body.setAttribute("data-bs-theme", theme);
+}
+
+function initMenuBadgeAndLogout() {
+    const menuBadge = document.getElementById("menuBadge");
+    const menuLogoutBtn = document.getElementById("menuLogoutBtn");
+    if (!menuBadge) return;
+    const pathname = window.location.pathname;
+    const badgeFromBody = document.body.dataset.badge || "";
+    const isAdminDashboard = pathname === "/admin/dashboard" || pathname.indexOf("/admin/dashboard") === 0;
+    const displayBadge = badgeFromBody || (isAdminDashboard ? "Админ" : "") || "—";
+    menuBadge.textContent = displayBadge;
+    if (menuLogoutBtn) {
+        menuLogoutBtn.style.display = badgeFromBody || isAdminDashboard ? "" : "none";
+        menuLogoutBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (isAdminDashboard) {
+                fetch("/api/admin/logout", { method: "POST", credentials: "include" })
+                    .then(() => { window.location.href = "/admin"; })
+                    .catch(() => { window.location.href = "/admin"; });
+            } else if (badgeFromBody) {
+                window.location.href = "/logout";
+            }
+        });
+    }
 }
 
 function initThemeToggle() {
@@ -575,8 +608,44 @@ function initWorkPage() {
     const repeatMxChip = document.getElementById("repeatMxChip");
     const repeatMxChipLabel = document.getElementById("repeatMxChipLabel");
     const todaySavedCountEl = document.getElementById("todaySavedCount");
+    const offlineQueueBar = document.getElementById("offlineQueueBar");
+    const offlineQueueCount = document.getElementById("offlineQueueCount");
+    const offlineQueueSyncBtn = document.getElementById("offlineQueueSyncBtn");
+    const offlineQueueHint = document.getElementById("offlineQueueHint");
 
     badgeLabel.textContent = badge;
+
+    function updateOfflineQueueUI() {
+        const queue = OfflineQueue.getAll();
+        const n = queue.length;
+        if (offlineQueueBar && offlineQueueCount) {
+            if (n === 0) {
+                offlineQueueBar.classList.add("d-none");
+            } else {
+                offlineQueueBar.classList.remove("d-none");
+                offlineQueueCount.textContent = n;
+            }
+            const online = navigator.onLine;
+            if (offlineQueueSyncBtn) {
+                offlineQueueSyncBtn.disabled = !online;
+                offlineQueueSyncBtn.title = online ? "Отправить неотправленные сканы на сервер" : "Нет сети — подключитесь к интернету";
+            }
+            if (offlineQueueHint) {
+                offlineQueueHint.textContent = online ? "Нажмите «Синхронизировать», чтобы отправить." : "При появлении сети нажмите «Синхронизировать».";
+            }
+        }
+        const headerIndicator = document.getElementById("headerOfflineQueueIndicator");
+        const headerCount = document.getElementById("headerOfflineQueueCount");
+        if (headerIndicator && headerCount) {
+            if (n === 0) {
+                headerIndicator.classList.add("d-none");
+            } else {
+                headerIndicator.classList.remove("d-none");
+                headerCount.textContent = n;
+                headerIndicator.title = n === 1 ? "1 скан в очереди на отправку" : `${n} сканов в очереди на отправку`;
+            }
+        }
+    }
 
     function updateTodaySavedCount() {
         if (!todaySavedCountEl) return;
@@ -589,6 +658,8 @@ function initWorkPage() {
         try { localStorage.setItem(SCAN_ONLY_STORAGE_KEY, on ? "1" : "0"); } catch (e) {}
         document.body.classList.toggle("scan-only-mode", on);
         if (scanOnlyToggle) scanOnlyToggle.checked = on;
+        const headerIndicator = document.getElementById("headerScanOnlyIndicator");
+        if (headerIndicator) headerIndicator.classList.toggle("d-none", !on);
     }
 
     function setTodayDates() {
@@ -598,6 +669,7 @@ function initWorkPage() {
     }
 
     async function updateOnlineStatus() {
+        updateOfflineQueueUI();
         if (!onlineBadge) return;
         if (!navigator.onLine) {
             onlineBadge.textContent = "Офлайн";
@@ -1314,6 +1386,7 @@ function initWorkPage() {
             showAlert(placeAlert, errorMessage, isQueued ? "info" : "danger");
             logEvent(errorMessage, isQueued ? "info" : "danger");
             if (!isQueued) SoundFeedback.playError();
+            updateOfflineQueueUI();
             if (isQueued) {
                 const nextMx = state.quickScanMode && state.suggestions.length
                     ? state.suggestions.find((s) => !state.scannedPlaceCodes.has((s.mx_code || "").toString().trim().toUpperCase()))?.mx_code
@@ -1615,8 +1688,19 @@ function initWorkPage() {
         showAlert(placeAlert, "Новая смена начата. Отчёты считаются с этого момента.", "info");
         logEvent("Начата новая смена", "info");
     }
-    newShiftBtn?.addEventListener("click", startNewShift);
-    newShiftBtnScanOnly?.addEventListener("click", startNewShift);
+    const newShiftConfirmModalEl = document.getElementById("newShiftConfirmModal");
+    const newShiftConfirmBtn = document.getElementById("newShiftConfirmBtn");
+    const newShiftConfirmModal = newShiftConfirmModalEl && typeof bootstrap !== "undefined" ? new bootstrap.Modal(newShiftConfirmModalEl) : null;
+    function showNewShiftConfirm() {
+        if (newShiftConfirmModal) newShiftConfirmModal.show();
+        else startNewShift();
+    }
+    newShiftConfirmBtn?.addEventListener("click", () => {
+        if (newShiftConfirmModal) newShiftConfirmModal.hide();
+        startNewShift();
+    });
+    newShiftBtn?.addEventListener("click", showNewShiftConfirm);
+    newShiftBtnScanOnly?.addEventListener("click", showNewShiftConfirm);
 
     refreshRouteBtn?.addEventListener("click", () => {
         loadRouteSuggestions();
@@ -1859,12 +1943,39 @@ function initWorkPage() {
     renderLastPlaces();
     updateStatusLabel();
     updateOnlineStatus();
+    updateOfflineQueueUI();
     loadHistory();
     refreshAnimations();
     placeInput?.focus();
-    window.addEventListener("online", () => {
+
+    offlineQueueSyncBtn?.addEventListener("click", async () => {
+        if (!navigator.onLine) {
+            showToastMessage("Нет сети. Подключитесь к интернету.", "warning");
+            return;
+        }
+        offlineQueueSyncBtn.disabled = true;
+        try {
+            await syncOfflineQueue();
+            updateOfflineQueueUI();
+            const left = OfflineQueue.getAll().length;
+            if (left === 0) showToastMessage("Очередь синхронизирована", "success");
+            else showToastMessage(`Отправлено. В очереди осталось: ${left}`, "info");
+        } finally {
+            offlineQueueSyncBtn.disabled = false;
+            updateOfflineQueueUI();
+        }
+    });
+
+    window.addEventListener("online", async () => {
         updateOnlineStatus();
-        syncOfflineQueue();
+        const sent = await syncOfflineQueue();
+        updateOfflineQueueUI();
+        if (sent > 0) {
+            const msg = sent === 1 ? "Сеть появилась. Отправлен 1 скан." : `Сеть появилась. Отправлено ${sent} сканов.`;
+            showToastMessage(msg, "success");
+        } else if (OfflineQueue.getAll().length === 0) {
+            showToastMessage("Очередь синхронизирована", "success");
+        }
     });
     window.addEventListener("offline", updateOnlineStatus);
 }
@@ -1971,23 +2082,35 @@ function initAdminDashboard() {
     const adminStatusChipAccuracy = document.getElementById("adminStatusChipAccuracy");
     const adminStatusChipWorkload = document.getElementById("adminStatusChipWorkload");
     const adminStatusChipRisk = document.getElementById("adminStatusChipRisk");
+    const employeesTableBody = document.getElementById("employeesTableBody");
+    const hourlyChartCanvas = document.getElementById("hourlyChart");
+    const adminPeriodSelect = document.getElementById("adminPeriodSelect");
+    const exportEmployeesBtn = document.getElementById("exportEmployeesBtn");
+    const ticketsCountBadge = document.getElementById("ticketsCountBadge");
 
     let dailyChartInstance = null;
     let statusChartInstance = null;
+    let hourlyChartInstance = null;
     let assignTaskModal = null;
     let reportsModal = null;
     let photoPreviewModal = null;
 
+    function getAdminPeriod() {
+        return (adminPeriodSelect && adminPeriodSelect.value) || "7d";
+    }
+
     async function loadAdminStats() {
-        const { ok, data } = await API.get("/api/admin/stats");
+        const period = getAdminPeriod();
+        const { ok, data } = await API.get(`/api/admin/stats?period=${encodeURIComponent(period)}`);
         if (!ok || data.error) {
-            overallAccuracyLabel.textContent = data.error || "Ошибка загрузки статистики";
+            if (overallAccuracyLabel) overallAccuracyLabel.textContent = data.error || "Ошибка загрузки статистики";
             return;
         }
 
         const overall = data.overall || {};
         const employees = data.employees || [];
         const discrepancyTypes = data.discrepancy_types || [];
+        const hourlyStats = data.hourly_stats || [];
 
         overallScannedValue.textContent = overall.total_scanned ?? 0;
         overallDiscrepancyValue.textContent = overall.with_discrepancy ?? 0;
@@ -2008,38 +2131,37 @@ function initAdminDashboard() {
             weeklyDelta.className = `badge text-bg-${accuracy >= 95 ? "success" : accuracy >= 85 ? "warning" : "danger"}`;
         }
 
-        // обновляем нижнюю статус-линию
         if (adminStatusBar && adminStatusBarText) {
             adminStatusBar.classList.remove("d-none");
             const total = overall.total_scanned ?? 0;
             const withDisc = overall.with_discrepancy ?? 0;
             const activeEmps = overall.total_employees ?? 0;
-            adminStatusBarText.textContent = `Сегодня: ${total} сканов • ${withDisc} с расхождениями • ${activeEmps} активных сотрудников`;
+            adminStatusBarText.textContent = `Период: ${total} сканов • ${withDisc} с расхождениями • ${activeEmps} сотрудников`;
 
-            if (adminStatusChipAccuracy) {
-                adminStatusChipAccuracy.textContent = `Точность ${accuracy}%`;
-            }
-            if (adminStatusChipWorkload) {
-                adminStatusChipWorkload.textContent = `Нагрузка: ${total} сканов`;
-            }
+            if (adminStatusChipAccuracy) adminStatusChipAccuracy.textContent = `Точность ${accuracy}%`;
+            if (adminStatusChipWorkload) adminStatusChipWorkload.textContent = `Нагрузка: ${total} сканов`;
             if (adminStatusChipRisk) {
-                const risk = accuracy >= 95 ? "Низкие риски" : accuracy >= 85 ? "Средние риски" : "Высокие риски";
-                adminStatusChipRisk.textContent = risk;
+                adminStatusChipRisk.textContent = accuracy >= 95 ? "Низкие риски" : accuracy >= 85 ? "Средние риски" : "Высокие риски";
             }
         }
 
-        renderList(
-            topEmployeesList,
-            employees.slice(0, 5),
-            (employee) => `
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="fw-semibold">${employee.badge}</div>
-                        <small class="text-muted">${employee.scanned} сканов, ${employee.total_hours}ч</small>
-                    </div>
-                    <span class="badge text-bg-${employee.accuracy >= 95 ? "success" : "warning"}">${employee.accuracy}%</span>
-                </div>`
-        );
+        if (employeesTableBody) {
+            employeesTableBody.innerHTML = employees.length
+                ? employees
+                    .map(
+                        (emp) => `
+                <tr>
+                    <td class="fw-semibold">${emp.badge}</td>
+                    <td class="text-center">${emp.scanned}</td>
+                    <td class="text-center"><span class="badge text-bg-${emp.accuracy >= 95 ? "success" : emp.accuracy >= 85 ? "warning" : "danger"}">${emp.accuracy}%</span></td>
+                    <td class="text-center">${emp.total_hours ?? "—"}</td>
+                </tr>`
+                    )
+                    .join("")
+                : `<tr><td colspan="4" class="text-center text-muted py-3">Нет данных</td></tr>`;
+        }
+
+        renderHourlyChart(hourlyStats);
 
         renderList(
             discrepancyTypesList,
@@ -2052,8 +2174,32 @@ function initAdminDashboard() {
         );
     }
 
+    function renderHourlyChart(hourlyStats) {
+        if (!hourlyChartCanvas || typeof Chart === "undefined") return;
+        const labels = (hourlyStats || []).map((item) => {
+            if (!item.hour) return "";
+            const d = new Date(item.hour);
+            return d.getHours().toString().padStart(2, "0") + ":00";
+        });
+        const counts = (hourlyStats || []).map((item) => item.count || 0);
+        if (hourlyChartInstance) hourlyChartInstance.destroy();
+        hourlyChartInstance = new Chart(hourlyChartCanvas, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [{ label: "Сканов", data: counts, backgroundColor: "rgba(110, 43, 98, 0.6)", borderColor: "#6E2B62", borderWidth: 1 }],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } },
+            },
+        });
+    }
+
     async function loadAnalytics() {
-        const { ok, data } = await API.get("/api/admin/analytics");
+        const period = getAdminPeriod();
+        const { ok, data } = await API.get(`/api/admin/analytics?period=${encodeURIComponent(period)}`);
         if (!ok || data.error) {
             if (dailyChartCanvas) {
                 dailyChartCanvas.innerHTML = `<div class="text-danger">${data.error || "Ошибка загрузки аналитики"}</div>`;
@@ -2064,7 +2210,7 @@ function initAdminDashboard() {
         const dailyStats = data.daily_stats || [];
         const problemZones = data.problem_zones || [];
         renderDailyChart(dailyStats);
-        renderStatusChart(dailyStats);
+        if (statusChartCanvas) renderStatusChart(dailyStats);
 
         if (problemZonesTableBody) {
             problemZonesTableBody.innerHTML = problemZones.length
@@ -2294,6 +2440,7 @@ function initAdminDashboard() {
         }
 
         const tickets = data.tickets || [];
+        if (ticketsCountBadge) ticketsCountBadge.textContent = tickets.length;
         ticketsBoard.innerHTML = tickets.length
             ? tickets
                   .map(
@@ -2427,6 +2574,17 @@ function initAdminDashboard() {
         loadDashboardBlockErrors(dashboardBlockErrorsSelect.value?.trim() || "");
     });
 
+    adminPeriodSelect?.addEventListener("change", () => {
+        loadAdminStats();
+        loadAnalytics();
+    });
+
+    exportEmployeesBtn?.addEventListener("click", () => {
+        const period = getAdminPeriod();
+        window.open(`/api/admin/export/employees?period=${encodeURIComponent(period)}`, "_blank");
+        showToastMessage("Выгрузка сводки по сотрудникам запущена", "info");
+    });
+
     refreshAdminBtn?.addEventListener("click", () => {
         loadAdminStats();
         loadAnalytics();
@@ -2445,7 +2603,11 @@ function initAdminDashboard() {
     });
 
     reportsModalEl?.addEventListener("show.bs.modal", () => {
-        loadReports();
+        // Не трогаем DOM во время открытия модалки — откладываем всё, чтобы не блокировать Bootstrap
+        requestAnimationFrame(() => {
+            if (reportsTableBody) reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">Загрузка…</td></tr>`;
+            setTimeout(() => loadReports(), 250);
+        });
     });
 
     problemZonesTableBody?.addEventListener("click", (event) => {
@@ -2523,11 +2685,38 @@ function initAdminDashboard() {
         window.open(url, "_blank");
     });
 
-    reportsTableBody?.addEventListener("click", (event) => {
-        const btn = event.target.closest("[data-report-id]");
-        if (!btn) return;
-        const reportId = btn.dataset.reportId;
-        window.open(`/api/admin/reports/${reportId}/download`, "_blank");
+    reportsTableBody?.addEventListener("click", async (event) => {
+        const link = event.target.closest('a[href*="/api/admin/reports/"][href*="/download"]');
+        if (!link) return;
+        event.preventDefault();
+        const url = link.getAttribute("href");
+        if (!url) return;
+        try {
+            const response = await fetch(url, { method: "GET", credentials: "include" });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                showToastMessage(err?.error || `Ошибка ${response.status}`, "danger");
+                return;
+            }
+            const blob = await response.blob();
+            const disposition = response.headers.get("Content-Disposition");
+            let filename = "report.xlsx";
+            if (disposition) {
+                const match = /filename\*?=(?:UTF-8'')?["']?([^"'\s;]+)/i.exec(disposition) || /filename=["']?([^"'\s;]+)/i.exec(disposition);
+                if (match && match[1]) filename = match[1].trim();
+            }
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = objectUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(objectUrl);
+            showToastMessage("Отчёт скачивается", "success");
+        } catch (e) {
+            showToastMessage(e?.message || "Не удалось скачать отчёт", "danger");
+        }
     });
 
     qualityReviewForm?.addEventListener("submit", async (event) => {
@@ -2648,8 +2837,14 @@ function initAdminDashboard() {
         const { ok, data } = await API.get("/api/admin/wh_ids");
         const list = ok && !data.error ? (data.wh_ids || []) : [];
         const optionHtml = (value, text) => `<option value="${value}">${text}</option>`;
+        const getWhLabel = (item) => {
+            const name = (item.warehouse_name || "").trim();
+            if (!name) return `Склад ${item.wh_id}`;
+            if (/^\d+$/.test(name)) return `Склад ${item.wh_id}`;
+            return `${item.wh_id} — ${name}`;
+        };
         if (dashboardBlockErrorsSelect) {
-            dashboardBlockErrorsSelect.innerHTML = "<option value=\"\">Выберите склад</option>" + list.map((item) => optionHtml(item.wh_id, item.warehouse_name ? `${item.wh_id} — ${item.warehouse_name}` : String(item.wh_id))).join("");
+            dashboardBlockErrorsSelect.innerHTML = "<option value=\"\">Выберите склад</option>" + list.map((item) => optionHtml(item.wh_id, getWhLabel(item))).join("");
         }
     }
 
@@ -2770,35 +2965,45 @@ function initAdminDashboard() {
     });
 
     async function loadReports() {
-        const { ok, data } = await API.get("/api/admin/reports");
-        if (!ok || data.error) {
-            reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">${data.error || "Ошибка загрузки"}</td></tr>`;
-            return;
-        }
-        const reports = data.reports || [];
-        reportsTableBody.innerHTML = reports.length
-            ? reports
-                  .map(
-                      (report) => `
+        if (!reportsTableBody) return;
+        try {
+            const { ok, data } = await API.get("/api/admin/reports");
+            if (!ok || data.error) {
+                reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">${(data && data.error) || "Ошибка загрузки"}</td></tr>`;
+                return;
+            }
+            const reports = Array.isArray(data.reports) ? data.reports : [];
+            reportsTableBody.innerHTML = reports.length
+                ? reports
+                      .map(
+                          (report) => {
+                              const rid = report.report_id != null ? report.report_id : null;
+                              const downloadBtn =
+                                  rid != null
+                                      ? `<a href="/api/admin/reports/${rid}/download" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><i class="bi bi-download me-1"></i>Скачать</a>`
+                                      : "<span class=\"text-muted\">—</span>";
+                              return `
                 <tr>
-                    <td>#${report.report_id}</td>
-                    <td>${report.filename}</td>
-                    <td>${report.badge}</td>
-                    <td>${report.total_scanned}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary" data-report-id="${report.report_id}">
-                            Скачать
-                        </button>
-                    </td>
-                </tr>`
-                  )
-                  .join("")
-            : `<tr><td colspan="5" class="text-center text-muted py-3">Отчеты отсутствуют</td></tr>`;
+                    <td>#${rid != null ? rid : "—"}</td>
+                    <td>${report.filename != null ? String(report.filename) : "—"}</td>
+                    <td>${report.badge != null ? String(report.badge) : "—"}</td>
+                    <td>${report.total_scanned != null ? report.total_scanned : "—"}</td>
+                    <td>${downloadBtn}</td>
+                </tr>`;
+                          }
+                      )
+                      .join("")
+                : `<tr><td colspan="5" class="text-center text-muted py-3">Отчеты отсутствуют</td></tr>`;
+        } catch (err) {
+            console.error("loadReports error", err);
+            reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">Ошибка: ${err.message || "не удалось загрузить"}</td></tr>`;
+        }
     }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     initThemeToggle();
+    initMenuBadgeAndLogout();
     initAnimations();
     const page = document.body.dataset.page;
     const map = {

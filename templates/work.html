@@ -33,6 +33,16 @@
             <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
         </span>
     </p>
+    <div class="offline-queue-bar alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 py-2 px-3 mt-2 mb-0" id="offlineQueueBar" role="status">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-cloud-arrow-up fs-5"></i>
+            <span>В очереди: <strong id="offlineQueueCount">0</strong> неотправленных сканов.</span>
+            <span class="small opacity-75" id="offlineQueueHint">При появлении сети нажмите «Синхронизировать».</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-warning" id="offlineQueueSyncBtn">
+            <i class="bi bi-arrow-repeat me-1"></i>Синхронизировать
+        </button>
+    </div>
 </section>
 
 <section class="card mb-4 scan-hero">
@@ -58,7 +68,7 @@
                             <span id="repeatMxChipLabel">Повторить</span>
                         </button>
                     </div>
-                    <p class="form-text small mt-2 mb-0">Сканер, камера или ввод вручную</p>
+                    <p class="form-text small mt-2 mb-0">Блок: Э + номер (Э6, Э10). Сканер, камера или ввод вручную.</p>
                 </form>
             </div>
             <div class="col-lg-7">
@@ -92,7 +102,11 @@
                                 </div>
                             </div>
                         </div>
-                        <p class="place-card-empty-hint text-muted small text-center mb-0 mt-2" id="placeCardEmptyHint">Введите код МХ и нажмите «Получить»</p>
+                        <div class="place-card-empty-state text-center py-3" id="placeCardEmptyHint">
+                            <i class="bi bi-upc-scan empty-state-icon d-block mb-2" aria-hidden="true"></i>
+                            <p class="place-card-empty-hint text-muted small mb-1 fw-semibold">Введите код МХ</p>
+                            <p class="place-card-empty-hint text-muted small mb-0">и нажмите «Получить» или отсканируйте штрихкод</p>
+                        </div>
                         <div class="alert alert-info py-2 mb-0 d-none" id="placeAlert" role="alert"></div>
                     </div>
                 </div>
@@ -234,6 +248,24 @@
 
 <div class="position-fixed top-0 end-0 p-3" style="z-index:1080">
     <div id="toastContainer" class="toast-container"></div>
+</div>
+
+<div class="modal fade" id="newShiftConfirmModal" tabindex="-1" aria-labelledby="newShiftConfirmTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="newShiftConfirmTitle"><i class="bi bi-clock-history me-2"></i>Новая смена</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">Начать новую смену? Счётчик сохранённых за сессию обнулится, отчёты будут считаться с этого момента.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="newShiftConfirmBtn"><i class="bi bi-check-lg me-1"></i>Начать новую смену</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="modal fade" id="qrModal" tabindex="-1">
