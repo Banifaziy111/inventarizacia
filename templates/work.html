@@ -1,77 +1,55 @@
 {% extends "base.html" %}
-
 {% block head_extra %}
 <script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.min.js') }}"></script>
 {% endblock %}
-
 {% block title %}Рабочее место{% endblock %}
 
 {% block content %}
-<section class="mb-4 content-fade-in">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <div>
-            <h1 class="h4 mb-0 heading-gradient">Сканирование мест</h1>
-            <p class="text-muted small mb-0">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
+<div class="work content-fade-in">
+    <header class="work-top">
+        <div class="work-top-left">
+            <h1 class="work-title">Сканирование мест</h1>
+            <p class="work-meta">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong> · <span id="lastSyncLabel">Синхронизация: —</span> · <span class="today-saved-pill" id="todaySavedCount" title="Сохранено за сессию">0</span></p>
         </div>
-        <div class="d-flex gap-2 align-items-center">
-            <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Отсутствует">
-                <input class="form-check-input" type="checkbox" id="scanOnlyToggle">
-                <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
-            </div>
-            <div class="full-mode-only d-flex gap-2">
-                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Начать новую смену — отчёты с нуля">
-                    <i class="bi bi-clock-history me-1"></i>Новая смена
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" id="refreshPlaceBtn">Обновить карточку</button>
+        <div class="work-top-right">
+            <label class="work-switch">
+                <input class="form-check-input" type="checkbox" id="scanOnlyToggle" title="Упрощённый экран">
+                <span>Только скан</span>
+            </label>
+            <div class="full-mode-only work-top-btns">
+                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Новая смена"><i class="bi bi-clock-history me-1"></i>Новая смена</button>
+                <button class="btn btn-outline-secondary btn-sm" id="refreshPlaceBtn">Обновить</button>
             </div>
         </div>
-    </div>
-    <p class="text-muted small mt-1 mb-0 d-flex align-items-center gap-2 flex-wrap">
-        <span id="lastSyncLabel">Синхронизация: —</span>
-        <span class="today-saved-wrap">
-            <span class="text-muted">·</span>
-            <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
-        </span>
-    </p>
-    <div class="offline-queue-bar alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 py-2 px-3 mt-2 mb-0" id="offlineQueueBar" role="status">
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-cloud-arrow-up fs-5"></i>
-            <span>В очереди: <strong id="offlineQueueCount">0</strong> неотправленных сканов.</span>
-            <span class="small opacity-75" id="offlineQueueHint">При появлении сети нажмите «Синхронизировать».</span>
-        </div>
-        <button type="button" class="btn btn-sm btn-warning" id="offlineQueueSyncBtn">
-            <i class="bi bi-arrow-repeat me-1"></i>Синхронизировать
-        </button>
-    </div>
-</section>
+    </header>
 
-<section class="card mb-4 scan-hero">
-    <div class="card-body p-4">
-        <div class="row g-4">
-            <div class="col-lg-5">
+    <div class="work-offline alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 py-2 px-3 mb-3" id="offlineQueueBar" role="status">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-cloud-arrow-up"></i>
+            <span>В очереди: <strong id="offlineQueueCount">0</strong> неотправленных сканов. <span class="small opacity-75" id="offlineQueueHint">При появлении сети нажмите «Синхронизировать».</span></span>
+        </div>
+        <button type="button" class="btn btn-sm btn-warning" id="offlineQueueSyncBtn"><i class="bi bi-arrow-repeat me-1"></i>Синхронизировать</button>
+    </div>
+
+    <section class="work-scan card scan-hero">
+        <div class="card-body work-scan-grid">
+            <div class="work-scan-form">
                 <form id="scanForm" class="needs-validation" novalidate>
                     <label class="form-label fw-semibold" for="placeInput">Код МХ</label>
                     <div class="input-group input-group-lg mb-2">
                         <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
-                        <input type="text" class="form-control" id="placeInput" name="place"
-                               placeholder="Э6.01.01.01 или 978086748"
-                               pattern="^[А-ЯЁA-Z0-9.\-]+$" inputmode="text" autocomplete="off" required autofocus>
+                        <input type="text" class="form-control" id="placeInput" name="place" placeholder="Э6.01.01.01 или 978086748" pattern="^[А-ЯЁA-Z0-9.\-]+$" inputmode="text" autocomplete="off" required autofocus>
                     </div>
                     <div class="d-flex gap-2 flex-wrap align-items-center">
                         <button type="submit" class="btn btn-primary">Получить</button>
                         <button type="button" class="btn btn-outline-secondary" id="clearPlaceBtn">Очистить</button>
-                        <button type="button" class="btn btn-outline-primary btn-qr" id="openQrScannerBtn">
-                            <i class="bi bi-qr-code me-1"></i>QR
-                        </button>
-                        <button type="button" class="repeat-mx-chip d-none" id="repeatMxChip" title="Загрузить этот МХ снова">
-                            <i class="bi bi-arrow-repeat"></i>
-                            <span id="repeatMxChipLabel">Повторить</span>
-                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-qr" id="openQrScannerBtn"><i class="bi bi-qr-code me-1"></i>QR</button>
+                        <button type="button" class="repeat-mx-chip d-none" id="repeatMxChip" title="Загрузить этот МХ снова"><i class="bi bi-arrow-repeat"></i> <span id="repeatMxChipLabel">Повторить</span></button>
                     </div>
                     <p class="form-text small mt-2 mb-0">Блок: Э + номер (Э6, Э10). Сканер, камера или ввод вручную.</p>
                 </form>
             </div>
-            <div class="col-lg-7">
+            <div class="work-scan-card">
                 <div class="card h-100 border place-card-mx position-relative overflow-hidden" id="placeCard">
                     <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Ошибка</span><span class="swipe-hint-right">Совпадает →</span></div>
                     <div class="card-body place-card-body" id="placeCardBody">
@@ -84,22 +62,13 @@
                         </div>
                         <div class="row g-2 mb-3">
                             <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Этаж</div>
-                                    <div class="fw-semibold place-value-empty" id="mxFloor">—</div>
-                                </div>
+                                <div class="p-2 rounded small info-block"><div class="text-muted">Этаж</div><div class="fw-semibold place-value-empty" id="mxFloor">—</div></div>
                             </div>
                             <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Ряд</div>
-                                    <div class="fw-semibold place-value-empty" id="mxRow">—</div>
-                                </div>
+                                <div class="p-2 rounded small info-block"><div class="text-muted">Ряд</div><div class="fw-semibold place-value-empty" id="mxRow">—</div></div>
                             </div>
                             <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Секция</div>
-                                    <div class="fw-semibold place-value-empty" id="mxSection">—</div>
-                                </div>
+                                <div class="p-2 rounded small info-block"><div class="text-muted">Секция</div><div class="fw-semibold place-value-empty" id="mxSection">—</div></div>
                             </div>
                         </div>
                         <div class="place-card-empty-state text-center py-3" id="placeCardEmptyHint">
@@ -112,154 +81,134 @@
                 </div>
             </div>
         </div>
-        <div class="scan-only-only mt-3 d-none" id="scanOnlyActions">
+        <div class="scan-only-only work-scan-only d-none" id="scanOnlyActions">
             <p class="small text-muted mb-2 text-center">Свайп по карточке или кнопки</p>
             <div class="d-flex gap-3 justify-content-center flex-wrap">
-                <button type="button" class="btn btn-success btn-lg scan-only-btn touch-target" id="scanOnlyOkBtn" data-scan-status="ok">
-                    <i class="bi bi-check-circle-fill me-2"></i>Совпадает
-                </button>
-                <button type="button" class="btn btn-danger btn-lg scan-only-btn touch-target" id="scanOnlyErrorBtn" data-scan-status="error">
-                    <i class="bi bi-x-circle-fill me-2"></i>Ошибка
-                </button>
+                <button type="button" class="btn btn-success btn-lg scan-only-btn touch-target" id="scanOnlyOkBtn" data-scan-status="ok"><i class="bi bi-check-circle-fill me-2"></i>Совпадает</button>
+                <button type="button" class="btn btn-danger btn-lg scan-only-btn touch-target" id="scanOnlyErrorBtn" data-scan-status="error"><i class="bi bi-x-circle-fill me-2"></i>Ошибка</button>
             </div>
             <div class="text-center mt-2">
-                <button type="button" class="btn btn-outline-primary btn-sm" id="newShiftBtnScanOnly" title="Начать новую смену">
-                    <i class="bi bi-clock-history me-1"></i>Новая смена
-                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="newShiftBtnScanOnly" title="Новая смена"><i class="bi bi-clock-history me-1"></i>Новая смена</button>
             </div>
         </div>
-    </div>
-</section>
+    </section>
 
-<section class="card mb-4 full-mode-only">
-    <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h3 class="h6 mb-0 section-title"><i class="bi bi-clipboard-check"></i>Фиксация результата</h3>
-            <span class="badge bg-secondary" id="statusLabel">Не выбран</span>
-        </div>
-        <p class="small text-muted mb-2">Выберите статус проверки</p>
-        <div class="d-flex gap-2 mb-3 flex-wrap" id="statusButtons">
-            <button type="button" class="btn btn-outline-success" data-status="ok">
-                <i class="bi bi-check-circle me-1"></i>Совпадает
-            </button>
-            <button type="button" class="btn btn-outline-danger" data-status="error">
-                <i class="bi bi-exclamation-octagon me-1"></i>Ошибка
-            </button>
-            <button type="button" class="btn btn-outline-warning" data-status="missing">
-                <i class="bi bi-dash-circle me-1"></i>Отсутствует
-            </button>
-            <button type="button" class="btn btn-outline-warning" data-status="shelf_error">
-                <i class="bi bi-grid-3x3-gap me-1"></i>Поломалось
-            </button>
-        </div>
-        <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
-            <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
-            <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
-                <option value="">Выберите причину…</option>
-            </select>
-            <div id="reasonDetailRow" class="d-none mb-2">
-                <label class="form-label small text-muted" id="reasonDetailLabel"></label>
-                <select class="form-select form-select-sm d-none" id="reasonDetailSelect"></select>
-                <input type="text" class="form-control form-control-sm d-none" id="reasonDetailInput" placeholder="">
+    <section class="work-result card full-mode-only">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h6 mb-0 section-title"><i class="bi bi-clipboard-check"></i>Фиксация результата</h3>
+                <span class="badge bg-secondary" id="statusLabel">Не выбран</span>
             </div>
-            <div id="otherReasonBlock" class="d-none">
-                <input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…">
+            <p class="small text-muted mb-2">Выберите статус проверки</p>
+            <div class="d-flex gap-2 mb-3 flex-wrap" id="statusButtons">
+                <button type="button" class="btn btn-outline-success" data-status="ok"><i class="bi bi-check-circle me-1"></i>Совпадает</button>
+                <button type="button" class="btn btn-outline-danger" data-status="error"><i class="bi bi-exclamation-octagon me-1"></i>Ошибка</button>
+                <button type="button" class="btn btn-outline-warning" data-status="missing"><i class="bi bi-dash-circle me-1"></i>Отсутствует</button>
+                <button type="button" class="btn btn-outline-warning" data-status="shelf_error"><i class="bi bi-grid-3x3-gap me-1"></i>Поломалось</button>
             </div>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small">Комментарий</label>
-            <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
-        </div>
-        <div class="row g-3">
-            <div class="col-md-6">
-                <label class="form-label small">Фото</label>
-                <div class="border rounded p-3 text-center" id="photoDropzone">
-                    <input type="file" id="photoInput" accept="image/*" multiple hidden>
-                    <i class="bi bi-cloud-upload fs-2 d-block text-muted mb-1"></i>
-                    <p class="small text-muted mb-1">Перетащите или</p>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
-                    <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
+            <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
+                <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
+                <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect"><option value="">Выберите причину…</option></select>
+                <div id="reasonDetailRow" class="d-none mb-2">
+                    <label class="form-label small text-muted" id="reasonDetailLabel"></label>
+                    <select class="form-select form-select-sm d-none" id="reasonDetailSelect"></select>
+                    <input type="text" class="form-control form-control-sm d-none" id="reasonDetailInput" placeholder="">
                 </div>
-                <p class="small text-muted mt-1 mb-0" id="photoHint">Можно несколько фото</p>
+                <div id="otherReasonBlock" class="d-none"><input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…"></div>
             </div>
-            <div class="col-md-6 d-flex flex-column justify-content-end">
-                <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" id="quickScanMode">
-                    <label class="form-check-label small" for="quickScanMode">Быстрый скан (авто-следующий МХ)</label>
+            <div class="mb-3">
+                <label class="form-label small">Комментарий</label>
+                <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small">Фото</label>
+                    <div class="border rounded p-3 text-center" id="photoDropzone">
+                        <input type="file" id="photoInput" accept="image/*" multiple hidden>
+                        <i class="bi bi-cloud-upload fs-2 d-block text-muted mb-1"></i>
+                        <p class="small text-muted mb-1">Перетащите или</p>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
+                        <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
+                    </div>
+                    <p class="small text-muted mt-1 mb-0" id="photoHint">Можно несколько фото</p>
                 </div>
-                <button type="button" class="btn btn-primary btn-lg" id="saveScanBtn">
-                    <span class="spinner-border spinner-border-sm me-2 d-none" id="saveSpinner" role="status"></span>
-                    Сохранить
-                </button>
-                <p class="small text-muted mt-2 mb-0">Карточка очистится после сохранения</p>
+                <div class="col-md-6 d-flex flex-column justify-content-end">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="quickScanMode">
+                        <label class="form-check-label small" for="quickScanMode">Быстрый скан (авто-следующий МХ)</label>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-lg" id="saveScanBtn">
+                        <span class="spinner-border spinner-border-sm me-2 d-none" id="saveSpinner" role="status"></span>
+                        Сохранить
+                    </button>
+                    <p class="small text-muted mt-2 mb-0">Карточка очистится после сохранения</p>
+                </div>
             </div>
         </div>
-    </div>
-</section>
+    </section>
 
-<section class="card mb-4 full-mode-only card-history">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-            <h3 class="h6 mb-0 section-title"><i class="bi bi-clock-history"></i>История сканов</h3>
-            <div class="d-flex gap-1 align-items-center">
-                <input type="date" class="form-control form-control-sm" id="historyFrom" style="max-width:140px">
-                <input type="date" class="form-control form-control-sm" id="historyTo" style="max-width:140px">
-                <button type="button" class="btn btn-sm btn-outline-primary" id="historyReloadBtn">Показать</button>
-                <button type="button" class="btn btn-sm btn-outline-danger" id="historyDownloadBadBtn">Скачать ошибки
-                    
-                </button>
+    <section class="work-history card full-mode-only card-history">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <h3 class="h6 mb-0 section-title"><i class="bi bi-clock-history"></i>История сканов</h3>
+                <div class="d-flex gap-1 align-items-center">
+                    <input type="date" class="form-control form-control-sm" id="historyFrom" style="max-width:140px">
+                    <input type="date" class="form-control form-control-sm" id="historyTo" style="max-width:140px">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="historyReloadBtn">Показать</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="historyDownloadBadBtn">Скачать ошибки</button>
+                </div>
+            </div>
+            <div class="table-responsive table-wrap-history">
+                <table class="table table-sm table-hover">
+                    <thead><tr><th>Время</th><th>МХ</th><th>Статус</th><th>Расх.</th><th>Фото</th></tr></thead>
+                    <tbody id="historyTableBody">
+                        <tr class="history-empty-row">
+                            <td colspan="5" class="p-0 border-0">
+                                <div class="history-empty-state" id="historyEmptyState">
+                                    <i class="bi bi-calendar3 history-empty-icon"></i>
+                                    <p class="history-empty-title">Выберите период</p>
+                                    <p class="history-empty-text">Укажите даты и нажмите «Показать» — здесь появятся ваши сканы</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
-        <div class="table-responsive table-wrap-history">
-            <table class="table table-sm table-hover">
-                <thead>
-                <tr><th>Время</th><th>МХ</th><th>Статус</th><th>Расх.</th><th>Фото</th></tr>
-                </thead>
-                <tbody id="historyTableBody">
-                <tr class="history-empty-row">
-                    <td colspan="5" class="p-0 border-0">
-                        <div class="history-empty-state" id="historyEmptyState">
-                            <i class="bi bi-calendar3 history-empty-icon"></i>
-                            <p class="history-empty-title">Выберите период</p>
-                            <p class="history-empty-text">Укажите даты и нажмите «Показать» — здесь появятся ваши сканы</p>
-                        </div>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</section>
+    </section>
 
-<aside class="card mb-4 full-mode-only card-journal" id="notificationPanel">
-    <div class="card-body py-2">
-        <div class="d-flex justify-content-between align-items-center">
-            <span class="small fw-semibold section-title-inline"><i class="bi bi-journal-text me-1"></i>Журнал</span>
-            <button class="btn btn-link btn-sm p-0 text-muted" id="clearLogBtn">очистить</button>
+    <aside class="work-journal card full-mode-only card-journal" id="notificationPanel">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold section-title-inline"><i class="bi bi-journal-text me-1"></i>Журнал</span>
+                <button class="btn btn-link btn-sm p-0 text-muted" id="clearLogBtn">очистить</button>
+            </div>
+            <div class="small text-muted mt-1" id="notificationList">Нет событий</div>
         </div>
-        <div class="small text-muted mt-1" id="notificationList">Нет событий</div>
-    </div>
-</aside>
+    </aside>
+</div>
 
-<button type="button" class="btn btn-primary rounded-circle position-fixed bottom-0 end-0 m-4 shadow full-mode-only" id="fabScanBtn"
-        style="width:56px;height:56px;z-index:1050" title="QR-сканер">
-    <i class="bi bi-qr-code-scan fs-4"></i>
-</button>
+<button type="button" class="btn btn-primary rounded-circle position-fixed bottom-0 end-0 m-4 shadow full-mode-only" id="fabScanBtn" style="width:56px;height:56px;z-index:1050" title="QR-сканер"><i class="bi bi-qr-code-scan fs-4"></i></button>
 
 <div class="position-fixed top-0 end-0 p-3 toast-container-wrapper" id="toastContainerWrapper">
     <div id="toastContainer" class="toast-container"></div>
 </div>
 
-<div class="modal fade" id="newShiftConfirmModal" tabindex="-1" aria-labelledby="newShiftConfirmTitle" aria-hidden="true">
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
+{% endblock %}
+{% endblock %}
+
+{% block modals %}
+<div class="modal fade" id="newShiftConfirmModal" tabindex="-1" aria-labelledby="newShiftConfirmTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="newShiftConfirmTitle"><i class="bi bi-clock-history me-2"></i>Новая смена</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
-            <div class="modal-body">
-                <p class="mb-0">Начать новую смену? Счётчик сохранённых за сессию обнулится, отчёты будут считаться с этого момента.</p>
-            </div>
+            <div class="modal-body"><p class="mb-0">Начать новую смену? Счётчик сохранённых за сессию обнулится, отчёты будут считаться с этого момента.</p></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
                 <button type="button" class="btn btn-primary" id="newShiftConfirmBtn"><i class="bi bi-check-lg me-1"></i>Начать новую смену</button>
@@ -267,7 +216,6 @@
         </div>
     </div>
 </div>
-
 <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -280,24 +228,14 @@
             </div>
             <div class="modal-body qr-modal-body">
                 <p class="small text-muted">Наведите камеру на QR-код</p>
-                <div class="qr-reader-wrap">
-                    <div id="qrReader" class="border rounded"></div>
-                </div>
+                <div class="qr-reader-wrap"><div id="qrReader" class="border rounded"></div></div>
                 <p class="text-center mt-2 mb-0"><span class="badge bg-secondary" id="qrStatus">Инициализация</span></p>
             </div>
             <div class="modal-footer d-flex justify-content-between">
-                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="qrTorchBtn" title="Включить фонарик">
-                    <i class="bi bi-flashlight" id="qrTorchIcon"></i>
-                    <span id="qrTorchLabel">Фонарик</span>
-                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="qrTorchBtn" title="Включить фонарик"><i class="bi bi-flashlight" id="qrTorchIcon"></i> <span id="qrTorchLabel">Фонарик</span></button>
                 <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>
     </div>
 </div>
-
-{% block scripts %}
-{{ super() }}
-<script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
-{% endblock %}
 {% endblock %}

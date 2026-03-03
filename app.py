@@ -813,7 +813,8 @@ def export_user_history():
                 params.append(date_to)
 
             query += " ORDER BY ir.created_at DESC"
-
+            if IS_VERCEL:
+                query += " LIMIT 3000"
             cur.execute(query, params)
             rows = cur.fetchall()
 
@@ -2893,7 +2894,12 @@ def export_block_errors():
                   AND (wp.wh_id = %s OR wp2.wh_id = %s)
                   AND NOT EXISTS (SELECT 1 FROM repaired_places rp WHERE rp.wh_id = %s AND rp.place_cod = ir.place_cod AND (rp.status = 'repaired' OR rp.status IS NULL))
             """
-            cur.execute(query + " ORDER BY ir.place_name, ir.created_at DESC", (wh_id, wh_id, wh_id))
+            # На Vercel лимит 60 с — ограничиваем выборку, иначе таймаут
+            export_limit = 2500 if IS_VERCEL else 50000
+            cur.execute(
+                query + " ORDER BY ir.place_name, ir.created_at DESC LIMIT %s",
+                (wh_id, wh_id, wh_id, export_limit),
+            )
             rows = cur.fetchall()
 
         def _status_label(s):
@@ -2939,7 +2945,7 @@ def export_block_errors():
         photo_col = len(headers)
         row_height = 75
         img_max_height = 60
-        MAX_EMBEDDED_PHOTOS = 100
+        MAX_EMBEDDED_PHOTOS = 50 if IS_VERCEL else 100
 
         for excel_row_idx, row in enumerate(rows, start=2):
             created = row["created_at"]
