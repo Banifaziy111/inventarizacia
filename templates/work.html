@@ -246,7 +246,7 @@
     <i class="bi bi-qr-code-scan fs-4"></i>
 </button>
 
-<div class="position-fixed top-0 end-0 p-3" style="z-index:1080">
+<div class="position-fixed top-0 end-0 p-3 toast-container-wrapper" id="toastContainerWrapper">
     <div id="toastContainer" class="toast-container"></div>
 </div>
 
@@ -268,12 +268,15 @@
     </div>
 </div>
 
-<div class="modal fade" id="qrModal" tabindex="-1">
+<div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">QR-код</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <div class="modal-header d-flex align-items-center justify-content-between">
+                <h5 class="modal-title" id="qrModalTitle">QR-код</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
             </div>
             <div class="modal-body">
                 <p class="small text-muted">Наведите камеру на QR-код</p>

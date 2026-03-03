@@ -1506,6 +1506,10 @@ body[data-theme="dark"] .theme-icon-moon {
 }
 
 /* ========== TOASTS ========== */
+/* Контейнер тостов ниже модалок (1090), чтобы не перекрывать QR и другие модалки */
+.toast-container-wrapper {
+    z-index: 1040;
+}
 .toast-container {
     max-width: min(360px, calc(100vw - 1.5rem));
 }
