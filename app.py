@@ -155,6 +155,36 @@ def safe_rollback(conn):
             logger.error("Ошибка при rollback: %s", e)
 
 
+def ensure_shift_start_table(conn):
+    """Создаёт таблицу shift_start при первом обращении (граница смены для блокировки дубликатов МХ)."""
+    if not conn or conn.closed:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS shift_start (
+                    badge TEXT NOT NULL PRIMARY KEY,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
+                )
+            """)
+    except Exception as e:
+        logger.warning("Не удалось создать shift_start: %s", e)
+
+
+def ensure_warehouse_places_mx_status(conn):
+    """Добавляет колонку mx_status в warehouse_places при первом обращении (Статус МХ: Активно, есть/нет товаров)."""
+    if not conn or conn.closed:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE warehouse_places
+                ADD COLUMN IF NOT EXISTS mx_status VARCHAR(150)
+            """)
+    except Exception as e:
+        logger.warning("Не удалось добавить mx_status: %s", e)
+
+
 def ensure_tasks_table():
     """Создаёт таблицы active_tasks, inventory_results и связанные структуры."""
     conn = None
@@ -1083,6 +1113,31 @@ def update_user_session():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/user/shift/start', methods=['POST'])
+def start_shift():
+    """Сброс границы смены: после этого дубликат МХ в рамках смены снова разрешён."""
+    data = request.get_json() or {}
+    badge = (data.get('badge') or '').strip()
+    if not badge:
+        return jsonify({'error': 'Не указан badge'}), 400
+    conn = None
+    try:
+        conn = get_db()
+        ensure_shift_start_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO shift_start (badge, started_at)
+                VALUES (%s, NOW())
+                ON CONFLICT (badge) DO UPDATE SET started_at = NOW()
+            """, (badge,))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        safe_rollback(conn)
+        logger.exception("Ошибка сброса смены")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/auth', methods=['POST'])
 def admin_auth():
     """Авторизация администратора."""
@@ -1139,6 +1194,7 @@ def get_place(place_cod):
 
     try:
         conn = get_db()
+        ensure_warehouse_places_mx_status(conn)
         with conn.cursor() as cur:
             if search_by_id:
                 # Поиск по числовому mx_id
@@ -1160,6 +1216,7 @@ def get_place(place_cod):
                         cell,
                         current_volume,
                         current_occupancy,
+                        mx_status,
                         updated_at
                     FROM warehouse_places
                     WHERE mx_id = %s
@@ -1187,6 +1244,7 @@ def get_place(place_cod):
                         cell,
                         current_volume,
                         current_occupancy,
+                        mx_status,
                         updated_at
                     FROM warehouse_places
                     WHERE UPPER(TRIM(mx_code)) = UPPER(TRIM(%s))
@@ -1214,6 +1272,7 @@ def get_place(place_cod):
                             cell,
                             current_volume,
                             current_occupancy,
+                            mx_status,
                             updated_at
                         FROM warehouse_places
                         WHERE REPLACE(UPPER(mx_code), ' ', '') = REPLACE(UPPER(TRIM(%s)), ' ', '')
@@ -1286,6 +1345,7 @@ def get_place(place_cod):
                     'cell': row['cell'],
                     'current_volume': float(row['current_volume']) if row['current_volume'] else None,
                     'current_occupancy': row['current_occupancy'],
+                    'mx_status': row.get('mx_status'),
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'admin_status': admin_status,
                 }
@@ -1380,6 +1440,29 @@ def complete_scan():
                     has_discrepancy = has_discrepancy or int(qty_shk_db) != qty_fact_int
                 except ValueError:
                     pass
+
+            # Дубликат в рамках одной смены: один и тот же МХ этим сотрудником уже сканировался после границы смены
+            ensure_shift_start_table(conn)
+            # При первом визите: граница смены = начало уже сохранённых сканов этого бэйджа (или NOW()), чтобы дубликаты блокировались
+            cur.execute("""
+                INSERT INTO shift_start (badge, started_at)
+                SELECT %s, COALESCE(
+                    (SELECT MIN(created_at) FROM inventory_results WHERE badge = %s),
+                    NOW()
+                )
+                ON CONFLICT (badge) DO NOTHING
+            """, (badge, badge))
+            cur.execute("""
+                SELECT 1 FROM inventory_results ir
+                WHERE ir.badge = %s AND ir.place_cod = %s
+                  AND ir.created_at >= (SELECT started_at FROM shift_start WHERE shift_start.badge = %s)
+                LIMIT 1
+            """, (badge, place_cod_int, badge))
+            if cur.fetchone():
+                return jsonify({
+                    'error': 'Этот МХ уже отсканирован в текущей смене. Нажмите «Новая смена», чтобы сбросить границу смены и сканировать повторно.',
+                    'code': 'duplicate_in_shift'
+                }), 409
 
             cur.execute(
                 """
