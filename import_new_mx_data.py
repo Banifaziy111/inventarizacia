@@ -153,6 +153,7 @@ def process_csv_row(row: Dict) -> Optional[Dict]:
     - Текущая заполненая вместимость МХ МХ ячейки
     - Фото-фиксация (кейс превышен или открытое МХ последнии 30 дней)
     - Стат код локации
+    - Статус МХ (Активно, есть товары / Активно, нет товаров)
     """
     try:
         mx_id = int(row.get('Id МХ', 0))
@@ -220,7 +221,8 @@ def process_csv_row(row: Dict) -> Optional[Dict]:
             'current_volume': safe_float(row.get('Текущий объем МХ')),
             'current_occupancy': row.get('Текущая заполненая вместимость МХ МХ ячейки', '').strip() or None,
             'photo_fixation': row.get('Фото-фиксация (кейс превышен или открытое МХ последнии 30 дней)', '').strip() or None,
-            'location_stat_code': safe_float(row.get('Стат код локации'))
+            'location_stat_code': safe_float(row.get('Стат код локации')),
+            'mx_status': (row.get('Статус МХ') or row.get('Статус') or '').strip() or None,
         }
         
         return record
@@ -293,7 +295,7 @@ def insert_batch(
             mx_id, mx_code, floor, row_num, code, section, shelf, number, cell, number_2,
             storage_type, category, size_group, dimensions,
             wh_id, warehouse_name, box_type, current_volume, current_occupancy,
-            photo_fixation, location_stat_code
+            photo_fixation, location_stat_code, mx_status
         ) VALUES %s
         ON CONFLICT (mx_id) DO UPDATE SET
             mx_code = EXCLUDED.mx_code,
@@ -311,6 +313,7 @@ def insert_batch(
             current_occupancy = EXCLUDED.current_occupancy,
             photo_fixation = EXCLUDED.photo_fixation,
             location_stat_code = EXCLUDED.location_stat_code,
+            mx_status = EXCLUDED.mx_status,
             updated_at = CURRENT_TIMESTAMP
     """
     values = [
@@ -319,7 +322,8 @@ def insert_batch(
             r['section'], r['shelf'], r['number'], r['cell'], r['number_2'],
             r['storage_type'], r['category'], r['size_group'], r['dimensions'],
             r['wh_id'], r['warehouse_name'], r['box_type'], r['current_volume'],
-            r['current_occupancy'], r['photo_fixation'], r['location_stat_code']
+            r['current_occupancy'], r['photo_fixation'], r['location_stat_code'],
+            r.get('mx_status'),
         )
         for r in records
     ]
@@ -352,6 +356,10 @@ def main():
     conn = psycopg2.connect(**DB_CONFIG)
     
     try:
+        # Колонка «Статус МХ» (Активно, есть/нет товаров) — создаём при отсутствии
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE warehouse_places ADD COLUMN IF NOT EXISTS mx_status VARCHAR(150)")
+        conn.commit()
         # Одна транзакция на всю загрузку (без commit после каждой пачки) — сильно ускоряет.
         total_inserted = 0
         for csv_file in csv_files:
