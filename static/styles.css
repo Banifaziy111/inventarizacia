@@ -1491,6 +1491,27 @@ body[data-theme="dark"] .theme-icon-moon {
     color: var(--primary);
 }
 
+/* Разделители между блоками на рабочей странице */
+.work-blocks {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.work-blocks > .work-block {
+    margin-bottom: 0;
+}
+
+.work-blocks > .work-block + .work-block {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+[data-theme="dark"] .work-blocks > .work-block + .work-block {
+    border-top-color: var(--border);
+}
+
 /* Чип «Повторить последний МХ» */
 .repeat-mx-chip {
     display: inline-flex;
