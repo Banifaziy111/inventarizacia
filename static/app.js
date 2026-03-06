@@ -423,6 +423,8 @@ function initLoginPage() {
         }
         loginLeftPanel?.classList.remove("flipped");
 
+        badgeInput?.focus();
+
         if (deviceStatusInfo) {
             const cameraOk = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
             deviceStatusInfo.textContent = cameraOk
@@ -473,8 +475,7 @@ function initLoginPage() {
         if (cameraOk) {
             deviceStatusInfo.textContent = "Камера устройства поддерживается этим браузером. Можно использовать сканер.";
         } else {
-            deviceStatusInfo.textContent =
-                "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
+            deviceStatusInfo.textContent = "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
         }
     }
 
@@ -1069,6 +1070,7 @@ function initWorkPage() {
         const mxFloor = document.getElementById("mxFloor");
         const mxRow = document.getElementById("mxRow");
         const mxSection = document.getElementById("mxSection");
+        const mxStatus = document.getElementById("mxStatus");
         const setPlaceValue = (el, value) => {
             if (!el) return;
             el.textContent = value ?? "—";
@@ -1077,6 +1079,7 @@ function initWorkPage() {
         setPlaceValue(mxFloor, data.floor != null ? String(data.floor) : null);
         setPlaceValue(mxRow, data.row_num != null ? String(data.row_num) : null);
         setPlaceValue(mxSection, data.section != null ? String(data.section) : null);
+        setPlaceValue(mxStatus, data.mx_status != null && data.mx_status !== "" ? String(data.mx_status) : null);
         placeUpdatedLabel.textContent = data.updated_at ? `Обновлено ${formatDate(data.updated_at)}` : "—";
         state.lastMxCode = data.place_cod;
         state.currentPlace = { place_cod: data.place_cod, place_name: data.place_name, qty_db: data.qty_shk, mx_type: data.mx_type };
@@ -1141,7 +1144,8 @@ function initWorkPage() {
         const mxFloor = document.getElementById("mxFloor");
         const mxRow = document.getElementById("mxRow");
         const mxSection = document.getElementById("mxSection");
-        [mxFloor, mxRow, mxSection].forEach((el) => {
+        const mxStatus = document.getElementById("mxStatus");
+        [mxFloor, mxRow, mxSection, mxStatus].forEach((el) => {
             if (el) { el.textContent = "—"; el.classList.add("place-value-empty"); }
         });
         placeUpdatedLabel.textContent = "—";
@@ -1385,10 +1389,11 @@ function initWorkPage() {
 
         if (!ok || data.error || !data.success) {
             const errorMessage = data.error || "Не удалось сохранить результат";
+            const isDuplicateInShift = data.code === "duplicate_in_shift" || (data.error && data.error.includes("уже отсканирован в текущей смене"));
             const isQueued = data.error && data.error.includes("очередь");
-            showAlert(placeAlert, errorMessage, isQueued ? "info" : "danger");
-            logEvent(errorMessage, isQueued ? "info" : "danger");
-            if (!isQueued) SoundFeedback.playError();
+            showAlert(placeAlert, errorMessage, isDuplicateInShift || isQueued ? "info" : "danger");
+            logEvent(errorMessage, isDuplicateInShift || isQueued ? "info" : "danger");
+            if (!isQueued && !isDuplicateInShift) SoundFeedback.playError();
             updateOfflineQueueUI();
             if (isQueued) {
                 const nextMx = state.quickScanMode && state.suggestions.length
@@ -1735,10 +1740,16 @@ function initWorkPage() {
         loadPlace(placeCod);
     }
 
-    function startNewShift() {
+    async function startNewShift() {
         try {
             sessionStorage.setItem(SHIFT_START_KEY, String(Date.now()));
         } catch (e) {}
+        try {
+            const { ok } = await API.post("/api/user/shift/start", { badge });
+            if (!ok) logEvent("Смена сброшена локально; сервер не обновил границу смены", "warning");
+        } catch (err) {
+            logEvent("Смена сброшена локально; ошибка связи с сервером", "warning");
+        }
         state.scannedPlaceCodes.clear();
         clearPlaceCard();
         showAlert(placeAlert, "Новая смена начата. Отчёты считаются с этого момента.", "info");
@@ -1859,44 +1870,9 @@ function initWorkPage() {
     saveScanBtn?.addEventListener("click", saveScan);
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
-    qrModalEl?.addEventListener("hidden.bs.modal", () => {
-        stopQrScanner();
-        if (qrOverlayObserver) {
-            qrOverlayObserver.disconnect();
-            qrOverlayObserver = null;
-        }
-    });
-    let qrOverlayObserver = null;
-    qrModalEl?.addEventListener("show.bs.modal", () => {
-        const disableFixedOverlays = () => {
-            const modalEl = document.getElementById("qrModal");
-            Array.from(document.body.children).forEach((el) => {
-                if (el === modalEl || el.classList.contains("modal-backdrop")) return;
-                if (modalEl && el.contains(modalEl)) return;
-                const s = getComputedStyle(el);
-                if (s.position === "fixed") el.style.pointerEvents = "none";
-            });
-            const reader = document.getElementById("qrReader");
-            if (reader) {
-                reader.style.pointerEvents = "none";
-                reader.querySelectorAll("*").forEach((el) => { el.style.pointerEvents = "none"; });
-            }
-        };
-        setTimeout(disableFixedOverlays, 100);
-        setTimeout(disableFixedOverlays, 500);
-        setTimeout(disableFixedOverlays, 2000);
-        qrOverlayObserver = new MutationObserver(() => disableFixedOverlays());
-        qrOverlayObserver.observe(document.body, { childList: true, subtree: true });
-    });
     document.addEventListener("keydown", (e) => {
         if (e.key !== "Escape") return;
-        if (qrOverlayRoot && document.body.contains(qrOverlayRoot)) {
-            closeQrOverlay();
-            return;
-        }
-        if (!qrModalEl?.classList.contains("show")) return;
-        qrModalInstance?.hide();
-        stopQrScanner();
+        if (qrOverlayRoot && document.body.contains(qrOverlayRoot)) closeQrOverlay();
     });
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;
@@ -2117,7 +2093,10 @@ function initAdminLoginPage() {
 function renderList(container, items, renderItem) {
     if (!container) return;
     if (!items?.length) {
-        container.innerHTML = '<div class="text-muted small">Нет данных</div>';
+        const isListGroup = container.classList.contains("list-group");
+        container.innerHTML = isListGroup
+            ? '<div class="list-group-item text-muted small admin-empty-list"><i class="bi bi-inbox me-2"></i>Нет данных</div>'
+            : '<div class="text-muted small">Нет данных</div>';
         return;
     }
     container.innerHTML = items.map(renderItem).join("");
@@ -2485,7 +2464,7 @@ function initAdminDashboard() {
         const { ok, data } = await API.get("/api/admin/reviews");
         if (!ok || data.error) {
             if (qualityTableBody) qualityTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">${data?.error || "Ошибка загрузки"}</td></tr>`;
-            if (qualityReviewList) qualityReviewList.innerHTML = '<div class="list-group-item text-muted">Ревизии не назначены</div>';
+            if (qualityReviewList) qualityReviewList.innerHTML = '<div class="list-group-item text-muted small admin-empty-list"><i class="bi bi-clipboard-check me-2"></i>Ревизии не загружены</div>';
             return;
         }
 
@@ -2521,7 +2500,7 @@ function initAdminDashboard() {
                 </div>`
                   )
                   .join("")
-            : '<div class="list-group-item text-muted">Ревизии не назначены</div>';
+            : '<div class="list-group-item text-muted small admin-empty-list"><i class="bi bi-clipboard-check me-2"></i>Нет ревизий</div>';
         refreshAnimations();
     }
 
