@@ -216,7 +216,8 @@ def process_csv_row(row: Dict) -> Optional[Dict]:
             'size_group': None,  # Нужно извлечь из других данных
             'dimensions': None,  # Нужно извлечь из других данных
             'wh_id': wh_id,
-            'warehouse_name': row.get('Этаж', '').strip() or None,
+            # Название склада: приоритет «Блок» / «Склад» (например «Электросталь 6»), иначе «Этаж»
+            'warehouse_name': (row.get('Блок', '') or row.get('Склад', '') or row.get('Этаж', '')).strip() or None,
             'box_type': row.get('Короба МХ', '').strip() or None,
             'current_volume': safe_float(row.get('Текущий объем МХ')),
             'current_occupancy': row.get('Текущая заполненая вместимость МХ МХ ячейки', '').strip() or None,

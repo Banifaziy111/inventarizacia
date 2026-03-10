@@ -2914,7 +2914,7 @@ function initAdminDashboard() {
             const name = (item.warehouse_name || "").trim();
             if (!name) return `Склад ${item.wh_id}`;
             if (/^\d+$/.test(name)) return `Склад ${item.wh_id}`;
-            return `${item.wh_id} — ${name}`;
+            return name;
         };
         if (dashboardBlockErrorsSelect) {
             dashboardBlockErrorsSelect.innerHTML = "<option value=\"\">Выберите склад</option>" + list.map((item) => optionHtml(item.wh_id, getWhLabel(item))).join("");
