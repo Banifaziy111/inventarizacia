@@ -14,7 +14,7 @@ load_dotenv()
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, g, jsonify, render_template, request, send_file, redirect
+from flask import Flask, g, jsonify, render_template, request, send_file, send_from_directory, redirect
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 if sys.platform == "win32":
@@ -60,10 +60,15 @@ db_connection = None
 IS_VERCEL = os.environ.get("VERCEL") == "1"
 
 
+@app.route('/static/manifest.json')
+def manifest_json():
+    """Manifest PWA — без проверки авторизации, чтобы не было 401 при загрузке со страницы."""
+    return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
+
+
 @app.route('/sw.js')
 def service_worker():
     """Service Worker для PWA (scope / через Service-Worker-Allowed)."""
-    from flask import send_from_directory
     resp = send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript')
     resp.headers['Service-Worker-Allowed'] = '/'
     return resp
