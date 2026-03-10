@@ -5,7 +5,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
-      "memory": 1500
+      "memory": 1200
     }
   },
   "rewrites": [
