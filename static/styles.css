@@ -1355,6 +1355,41 @@ button:focus-visible,
 }
 .quick-reason-chip:hover { border-color: var(--primary); color: var(--primary); }
 
+/* Выбор блоков синхронизации справочника */
+.sync-blocks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+}
+.sync-block-chip {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+}
+.sync-block-chip:hover {
+    border-color: var(--primary);
+    background: var(--bg-elevated);
+}
+.sync-block-chip.active {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+}
+.sync-block-chip .sync-block-code {
+    display: block;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.sync-block-chip .sync-block-name {
+    display: block;
+    font-size: .75rem;
+    opacity: .85;
+}
+
 .quick-error-wrap {
     border: 1px dashed var(--border);
     border-radius: var(--radius);

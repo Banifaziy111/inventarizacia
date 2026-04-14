@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -1984,13 +1985,14 @@ def get_task_suggestions():
 @app.route('/api/sync', methods=['GET'])
 def sync_data():
     """Синхронизация данных для offline работы (поддерживает инкрементальную загрузку)."""
-    allowed, retry_after = _check_rate_limit("sync_data", limit=60, window_seconds=60)
+    allowed, retry_after = _check_rate_limit("sync_data", limit=600, window_seconds=60)
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
 
     try:
         since_id_raw = request.args.get("since_id")
         limit_raw = request.args.get("limit")
+        blocks_raw = (request.args.get("blocks") or "").strip()
         try:
             since_id = int(since_id_raw) if since_id_raw not in (None, "") else None
         except ValueError:
@@ -2001,47 +2003,43 @@ def sync_data():
             return jsonify({"error": "limit должен быть числом"}), 400
         if limit is not None:
             limit = max(1, min(limit, 20000))
+        blocks = []
+        if blocks_raw:
+            # Поддержка разделителей: запятая/пробел/точка с запятой.
+            tokens = re.split(r"[,\s;]+", blocks_raw)
+            blocks = sorted({
+                t.strip().upper().split(".", 1)[0]
+                for t in tokens
+                if t and t.strip()
+            })
+            if len(blocks) > 50:
+                return jsonify({"error": "Слишком много блоков в одном запросе"}), 400
 
         conn = get_db()
         with conn.cursor() as cur:
-            if since_id is not None and limit is not None:
-                cur.execute(
-                    """
-                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
-                    FROM warehouse_places
-                    WHERE mx_id > %s
-                    ORDER BY mx_id
-                    LIMIT %s
-                    """,
-                    (since_id, limit),
-                )
-            elif since_id is not None:
-                cur.execute(
-                    """
-                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
-                    FROM warehouse_places
-                    WHERE mx_id > %s
-                    ORDER BY mx_id
-                    """,
-                    (since_id,),
-                )
-            elif limit is not None:
-                cur.execute(
-                    """
-                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
-                    FROM warehouse_places
-                    ORDER BY mx_id
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
-            else:
-                # Backward-compatible path: full dataset when params are absent.
-                cur.execute("""
-                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
-                    FROM warehouse_places
-                    ORDER BY mx_id
-                """)
+            query = """
+                SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                FROM warehouse_places
+                WHERE 1=1
+            """
+            params = []
+            if since_id is not None:
+                query += " AND mx_id > %s"
+                params.append(since_id)
+            if blocks:
+                query += """
+                    AND EXISTS (
+                        SELECT 1
+                        FROM unnest(%s::text[]) AS b(prefix)
+                        WHERE UPPER(TRIM(SPLIT_PART(warehouse_places.mx_code, '.', 1))) = b.prefix
+                    )
+                """
+                params.append(blocks)
+            query += " ORDER BY mx_id"
+            if limit is not None:
+                query += " LIMIT %s"
+                params.append(limit)
+            cur.execute(query, tuple(params))
             rows = cur.fetchall()
         
         data = [dict(row) for row in rows]
@@ -2054,12 +2052,38 @@ def sync_data():
             'data': data,
             'next_since_id': data[-1]['place_cod'] if data else since_id,
             'has_more': bool(limit and len(data) >= limit),
+            'blocks': blocks,
             'timestamp': datetime.now().isoformat()
         })
     
     except Exception as e:
         logger.exception("Ошибка при синхронизации данных")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sync/blocks', methods=['GET'])
+def get_sync_blocks():
+    """Список доступных блоков МХ (префикс до первой точки, например Э8/Э10)."""
+    allowed, retry_after = _check_rate_limit("sync_blocks", limit=30, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT UPPER(TRIM(SPLIT_PART(mx_code, '.', 1))) AS block
+                FROM warehouse_places
+                WHERE mx_code IS NOT NULL
+                  AND mx_code <> ''
+                ORDER BY block
+                """
+            )
+            blocks = [row["block"] for row in cur.fetchall() if row.get("block")]
+        return jsonify({"success": True, "blocks": blocks})
+    except Exception as e:
+        logger.exception("Ошибка получения списка блоков для синхронизации")
+        return jsonify({"error": str(e)}), 500
 
 
 def _admin_period_dates():

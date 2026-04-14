@@ -17,6 +17,7 @@ const PLACE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 const PLACE_CACHE_MAX = 6000;
 const SYNC_CURSOR_KEY = "inventory-sync-cursor";
 const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
+const SYNC_LAST_BLOCKS_KEY = "inventory-sync-last-blocks";
 const SYNC_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 часов
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
 
@@ -712,6 +713,10 @@ function initWorkPage() {
     const catalogSyncStatus = document.getElementById("catalogSyncStatus");
     const newShiftBtn = document.getElementById("newShiftBtn");
     const syncCatalogBtn = document.getElementById("syncCatalogBtn");
+    const syncCatalogModalEl = document.getElementById("syncCatalogModal");
+    const syncCatalogBlocksList = document.getElementById("syncCatalogBlocksList");
+    const syncCatalogApplyBtn = document.getElementById("syncCatalogApplyBtn");
+    const syncCatalogFullBtn = document.getElementById("syncCatalogFullBtn");
     const newShiftBtnScanOnly = document.getElementById("newShiftBtnScanOnly");
     const placeForm = document.getElementById("scanForm");
     const placeInput = document.getElementById("placeInput");
@@ -786,6 +791,141 @@ function initWorkPage() {
     const miniRecentScansHint = document.getElementById("miniRecentScansHint");
 
     badgeLabel.textContent = badge;
+    const syncCatalogModal =
+        syncCatalogModalEl && typeof bootstrap !== "undefined"
+            ? new bootstrap.Modal(syncCatalogModalEl)
+            : null;
+    let syncAvailableBlocks = [];
+    let syncBlockGroups = [];
+    let syncSelectedGroupCodes = new Set();
+    let syncBlockToGroupMap = new Map();
+
+    function blockDisplayName(blockCode) {
+        const code = String(blockCode || "").toUpperCase();
+        const m = code.match(/^Э(\d+)/);
+        if (m) return `Электросталь ${parseInt(m[1], 10)}`;
+        return code;
+    }
+
+    function extractBlockDigits(blockCode) {
+        const code = String(blockCode || "").toUpperCase().trim();
+        if (!code) return "";
+        // Поддерживаем "грязные" варианты вроде Э7П/ЭЛ7101/Э1002.
+        const tail = code.startsWith("Э") ? code.slice(1) : code;
+        const m = tail.match(/(\d+)/);
+        return m ? m[1] : "";
+    }
+
+    function resolveGroupCodeByBlock(blockCode) {
+        const code = String(blockCode || "").toUpperCase().trim();
+        if (!code) return "";
+        return syncBlockToGroupMap.get(code) || code;
+    }
+
+    function buildSyncBlockGroupingMap(blockCodes) {
+        const normalized = blockCodes
+            .map((x) => String(x || "").toUpperCase().trim())
+            .filter(Boolean);
+        // Базовые блоки берём только из "коротких" номеров (Э6/Э7/Э10/...),
+        // чтобы Э1001/Э102 попадали в Э10, а не создавали отдельные группы.
+        const baseNumbers = new Set();
+        normalized.forEach((code) => {
+            const m = code.match(/^Э(\d{1,2})$/);
+            if (m) baseNumbers.add(m[1]);
+        });
+        const sortedBases = Array.from(baseNumbers).sort((a, b) => b.length - a.length);
+        const map = new Map();
+        normalized.forEach((code) => {
+            const digits = extractBlockDigits(code);
+            if (!digits) {
+                map.set(code, code);
+                return;
+            }
+            const matchedBase = sortedBases.find((base) => digits.startsWith(base));
+            if (matchedBase) {
+                map.set(code, `Э${matchedBase}`);
+            } else {
+                // Fallback: группируем по первой цифре (Э7101 -> Э7), чтобы не дробить список.
+                map.set(code, `Э${digits.charAt(0)}`);
+            }
+        });
+        return map;
+    }
+
+    function buildSyncBlockGroups(blockCodes) {
+        syncBlockToGroupMap = buildSyncBlockGroupingMap(blockCodes);
+        const groupMap = new Map();
+        blockCodes.forEach((rawCode) => {
+            const sourceCode = String(rawCode || "").toUpperCase().trim();
+            if (!sourceCode) return;
+            const groupCode = resolveGroupCodeByBlock(sourceCode);
+            if (!groupMap.has(groupCode)) {
+                groupMap.set(groupCode, {
+                    groupCode,
+                    displayName: blockDisplayName(groupCode),
+                    sourceCodes: [],
+                });
+            }
+            const group = groupMap.get(groupCode);
+            if (!group.sourceCodes.includes(sourceCode)) group.sourceCodes.push(sourceCode);
+        });
+        const groups = Array.from(groupMap.values());
+        groups.forEach((g) => g.sourceCodes.sort((a, b) => a.localeCompare(b, "ru")));
+        groups.sort((a, b) => {
+            const am = a.groupCode.match(/^Э(\d+)/);
+            const bm = b.groupCode.match(/^Э(\d+)/);
+            if (am && bm) return Number(am[1]) - Number(bm[1]);
+            return a.groupCode.localeCompare(b.groupCode, "ru");
+        });
+        return groups;
+    }
+
+    function renderSyncBlocksSelector() {
+        if (!syncCatalogBlocksList) return;
+        if (!syncBlockGroups.length) {
+            syncCatalogBlocksList.innerHTML = '<div class="text-muted small">Блоки не найдены</div>';
+            return;
+        }
+        syncCatalogBlocksList.innerHTML = syncBlockGroups
+            .map((group) => {
+                const active = syncSelectedGroupCodes.has(group.groupCode) ? "active" : "";
+                const codesText = group.sourceCodes.join(", ");
+                return `
+                    <button type="button" class="sync-block-chip ${active}" data-sync-group="${group.groupCode}">
+                        <span class="sync-block-code">${group.displayName}</span>
+                        <span class="sync-block-name">${codesText}</span>
+                    </button>
+                `;
+            })
+            .join("");
+    }
+
+    async function openSyncCatalogModal() {
+        if (!syncCatalogBlocksList) return;
+        syncCatalogBlocksList.innerHTML = '<div class="text-muted small">Загрузка блоков…</div>';
+        syncAvailableBlocks = [];
+        const blocksRes = await API.get("/api/sync/blocks");
+        if (!blocksRes.ok || !blocksRes.data?.success || !Array.isArray(blocksRes.data.blocks)) {
+            showToastMessage(blocksRes.data?.error || "Не удалось загрузить блоки", "danger");
+            syncCatalogBlocksList.innerHTML = '<div class="text-danger small">Не удалось загрузить блоки</div>';
+            if (syncCatalogModal) syncCatalogModal.show();
+            return;
+        }
+        syncAvailableBlocks = blocksRes.data.blocks.map((b) => String(b || "").toUpperCase()).filter(Boolean);
+        syncBlockGroups = buildSyncBlockGroups(syncAvailableBlocks);
+        const lastBlocks = (localStorage.getItem(SYNC_LAST_BLOCKS_KEY) || "")
+            .split(",")
+            .map((x) => x.trim().toUpperCase())
+            .filter(Boolean);
+        const lastGroupCodes = lastBlocks.map((x) => resolveGroupCodeByBlock(x));
+        const initialGroups = lastGroupCodes.length
+            ? lastGroupCodes
+            : syncBlockGroups.slice(0, 2).map((g) => g.groupCode);
+        syncSelectedGroupCodes = new Set(initialGroups);
+        renderSyncBlocksSelector();
+        if (syncCatalogModal) syncCatalogModal.show();
+    }
+
     function setCatalogSyncStatus(text, type = "success") {
         if (!catalogSyncStatus) return;
         catalogSyncStatus.textContent = text;
@@ -802,13 +942,18 @@ function initWorkPage() {
 
     let placeSyncInProgress = false;
 
-    async function syncPlacesInChunks({ forceFull = false, silent = false } = {}) {
+    async function syncPlacesInChunks({ forceFull = false, silent = false, blocks = [] } = {}) {
         if (placeSyncInProgress) return;
         if (!navigator.onLine) {
             if (!silent) showToastMessage("Нет сети для синхронизации", "warning");
             setCatalogSyncStatus("Нет сети для синхронизации", "warning");
             return;
         }
+        const normalizedBlocks = Array.isArray(blocks)
+            ? Array.from(new Set(blocks.map((b) => String(b || "").trim().toUpperCase()).filter(Boolean)))
+            : [];
+        const blocksKeyPart = normalizedBlocks.length ? normalizedBlocks.join("|") : "ALL";
+        const cursorKey = `${SYNC_CURSOR_KEY}:${blocksKeyPart}`;
         placeSyncInProgress = true;
         const globalProgressBar = document.getElementById("globalProgressBar");
         if (globalProgressBar) globalProgressBar.classList.remove("d-none");
@@ -817,25 +962,45 @@ function initWorkPage() {
         try {
             let since = null;
             if (!forceFull) {
-                const raw = localStorage.getItem(SYNC_CURSOR_KEY);
+                const raw = localStorage.getItem(cursorKey);
                 if (raw && /^\d+$/.test(raw)) since = Number(raw);
             }
-            let limit = 700;
-            let pages = 0;
-            while (pages < 8) {
-                pages += 1;
+            let limit = 2000;
+            let rateLimitRetries = 0;
+            if (normalizedBlocks.length) {
+                setCatalogSyncStatus(`Синхронизация: ${normalizedBlocks.join(", ")}`, "secondary");
+            }
+            while (true) {
                 const t0 = performance.now ? performance.now() : Date.now();
                 const params = new URLSearchParams();
                 params.set("limit", String(limit));
                 if (since != null) params.set("since_id", String(since));
-                const { ok, data } = await API.get(`/api/sync?${params.toString()}`);
+                if (normalizedBlocks.length) params.set("blocks", normalizedBlocks.join(","));
+                const { ok, status, data } = await API.get(`/api/sync?${params.toString()}`);
                 const elapsed = (performance.now ? performance.now() : Date.now()) - t0;
+                if (status === 429) {
+                    // Сервер попросил притормозить — делаем паузу и пробуем снова.
+                    rateLimitRetries += 1;
+                    if (rateLimitRetries > 8) {
+                        hadSyncError = true;
+                        setCatalogSyncStatus("Слишком много запросов к серверу", "danger");
+                        if (!silent) showToastMessage("Синхронизация остановлена: лимит запросов", "danger");
+                        break;
+                    }
+                    const text = String(data?.error || "");
+                    const m = text.match(/(\d+)\s*сек/i);
+                    const waitSec = m ? Math.max(1, Number(m[1])) : 2;
+                    setCatalogSyncStatus(`Пауза ${waitSec}с (лимит API)`, "warning");
+                    await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+                    continue;
+                }
                 if (!ok || data?.error) {
                     if (!silent) showToastMessage(data?.error || "Ошибка синхронизации", "danger");
                     hadSyncError = true;
                     setCatalogSyncStatus("Ошибка синхронизации", "danger");
                     break;
                 }
+                rateLimitRetries = 0;
                 const rows = data?.data || [];
                 if (!rows.length) break;
                 // Пакетная запись вместо тысяч setItem подряд (сильно меньше лагов UI).
@@ -847,19 +1012,24 @@ function initWorkPage() {
                 }
                 // Адаптируем размер чанка под сеть/сервер:
                 // быстро -> увеличиваем, медленно -> уменьшаем.
-                if (elapsed < 600 && limit < 1200) limit = Math.min(1200, limit + 150);
-                else if (elapsed > 1200 && limit > 300) limit = Math.max(300, limit - 150);
+                if (elapsed < 700 && limit < 5000) limit = Math.min(5000, limit + 300);
+                else if (elapsed > 1400 && limit > 800) limit = Math.max(800, limit - 300);
                 if (!data?.has_more) break;
             }
-            if (since != null) localStorage.setItem(SYNC_CURSOR_KEY, String(since));
+            if (since != null) localStorage.setItem(cursorKey, String(since));
             localStorage.setItem(SYNC_LAST_AT_KEY, new Date().toISOString());
+            localStorage.setItem(SYNC_LAST_BLOCKS_KEY, normalizedBlocks.join(","));
             if (lastSyncLabel) {
-                lastSyncLabel.textContent = `Синхронизация: ${formatDate(new Date())}`;
+                const scope = normalizedBlocks.length ? ` (${normalizedBlocks.join(", ")})` : "";
+                lastSyncLabel.textContent = `Синхронизация: ${formatDate(new Date())}${scope}`;
             }
             if (!hadSyncError) {
                 setCatalogSyncStatus("Справочник синхронизирован", "success");
                 if (!silent) {
-                    if (totalLoaded > 0) showToastMessage(`Синхронизировано ${totalLoaded} МХ`, "success");
+                    if (totalLoaded > 0) {
+                        const suffix = normalizedBlocks.length ? ` (${normalizedBlocks.join(", ")})` : "";
+                        showToastMessage(`Синхронизировано ${totalLoaded} МХ${suffix}`, "success");
+                    }
                     else showToastMessage("Синхронизация актуальна", "info");
                 }
             }
@@ -2277,8 +2447,33 @@ function initWorkPage() {
     quickScanModeCheck?.addEventListener("change", () => {
         state.quickScanMode = !!quickScanModeCheck?.checked;
     });
-    syncCatalogBtn?.addEventListener("click", (event) => {
-        syncPlacesInChunks({ forceFull: !!event?.shiftKey, silent: false });
+    syncCatalogBtn?.addEventListener("click", () => {
+        openSyncCatalogModal();
+    });
+    syncCatalogBlocksList?.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-sync-group]");
+        if (!btn) return;
+        const groupCode = String(btn.dataset.syncGroup || "").toUpperCase();
+        if (!groupCode) return;
+        if (syncSelectedGroupCodes.has(groupCode)) syncSelectedGroupCodes.delete(groupCode);
+        else syncSelectedGroupCodes.add(groupCode);
+        renderSyncBlocksSelector();
+    });
+    syncCatalogApplyBtn?.addEventListener("click", () => {
+        const pickedGroups = Array.from(syncSelectedGroupCodes);
+        const picked = syncBlockGroups
+            .filter((g) => pickedGroups.includes(g.groupCode))
+            .flatMap((g) => g.sourceCodes);
+        if (!picked.length) {
+            showToastMessage("Выберите хотя бы один блок", "warning");
+            return;
+        }
+        if (syncCatalogModal) syncCatalogModal.hide();
+        syncPlacesInChunks({ forceFull: true, silent: false, blocks: picked });
+    });
+    syncCatalogFullBtn?.addEventListener("click", () => {
+        if (syncCatalogModal) syncCatalogModal.hide();
+        syncPlacesInChunks({ forceFull: true, silent: false, blocks: [] });
     });
     refreshPlaceBtn?.addEventListener("click", (event) => {
         if (state.lastMxCode) {
