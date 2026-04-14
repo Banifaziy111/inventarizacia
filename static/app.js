@@ -18,6 +18,7 @@ const PLACE_CACHE_MAX = 6000;
 const SYNC_CURSOR_KEY = "inventory-sync-cursor";
 const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
 const SYNC_LAST_BLOCKS_KEY = "inventory-sync-last-blocks";
+const SYNC_LAST_FLOORS_KEY = "inventory-sync-last-floors";
 const SYNC_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 часов
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
 
@@ -715,6 +716,7 @@ function initWorkPage() {
     const syncCatalogBtn = document.getElementById("syncCatalogBtn");
     const syncCatalogModalEl = document.getElementById("syncCatalogModal");
     const syncCatalogBlocksList = document.getElementById("syncCatalogBlocksList");
+    const syncCatalogFloorsList = document.getElementById("syncCatalogFloorsList");
     const syncCatalogApplyBtn = document.getElementById("syncCatalogApplyBtn");
     const syncCatalogFullBtn = document.getElementById("syncCatalogFullBtn");
     const newShiftBtnScanOnly = document.getElementById("newShiftBtnScanOnly");
@@ -797,7 +799,9 @@ function initWorkPage() {
             : null;
     let syncAvailableBlocks = [];
     let syncBlockGroups = [];
+    let syncAvailableFloors = [];
     let syncSelectedGroupCodes = new Set();
+    let syncSelectedFloors = new Set();
     let syncBlockToGroupMap = new Map();
 
     function blockDisplayName(blockCode) {
@@ -805,15 +809,6 @@ function initWorkPage() {
         const m = code.match(/^Э(\d+)/);
         if (m) return `Электросталь ${parseInt(m[1], 10)}`;
         return code;
-    }
-
-    function extractBlockDigits(blockCode) {
-        const code = String(blockCode || "").toUpperCase().trim();
-        if (!code) return "";
-        // Поддерживаем "грязные" варианты вроде Э7П/ЭЛ7101/Э1002.
-        const tail = code.startsWith("Э") ? code.slice(1) : code;
-        const m = tail.match(/(\d+)/);
-        return m ? m[1] : "";
     }
 
     function resolveGroupCodeByBlock(blockCode) {
@@ -826,28 +821,11 @@ function initWorkPage() {
         const normalized = blockCodes
             .map((x) => String(x || "").toUpperCase().trim())
             .filter(Boolean);
-        // Базовые блоки берём только из "коротких" номеров (Э6/Э7/Э10/...),
-        // чтобы Э1001/Э102 попадали в Э10, а не создавали отдельные группы.
-        const baseNumbers = new Set();
-        normalized.forEach((code) => {
-            const m = code.match(/^Э(\d{1,2})$/);
-            if (m) baseNumbers.add(m[1]);
-        });
-        const sortedBases = Array.from(baseNumbers).sort((a, b) => b.length - a.length);
         const map = new Map();
+        // После перехода на warehouse_name группируем "как есть":
+        // каждое название склада является отдельным логическим блоком.
         normalized.forEach((code) => {
-            const digits = extractBlockDigits(code);
-            if (!digits) {
-                map.set(code, code);
-                return;
-            }
-            const matchedBase = sortedBases.find((base) => digits.startsWith(base));
-            if (matchedBase) {
-                map.set(code, `Э${matchedBase}`);
-            } else {
-                // Fallback: группируем по первой цифре (Э7101 -> Э7), чтобы не дробить список.
-                map.set(code, `Э${digits.charAt(0)}`);
-            }
+            map.set(code, code);
         });
         return map;
     }
@@ -900,9 +878,65 @@ function initWorkPage() {
             .join("");
     }
 
+    function getSelectedSourceBlocks() {
+        const pickedGroups = Array.from(syncSelectedGroupCodes);
+        return syncBlockGroups
+            .filter((g) => pickedGroups.includes(g.groupCode))
+            .flatMap((g) => g.sourceCodes);
+    }
+
+    function renderSyncFloorsSelector() {
+        if (!syncCatalogFloorsList) return;
+        if (!syncAvailableFloors.length) {
+            syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Этажи не найдены</div>';
+            return;
+        }
+        syncCatalogFloorsList.innerHTML = syncAvailableFloors
+            .map((floor) => {
+                const active = syncSelectedFloors.has(floor) ? "active" : "";
+                return `<button type="button" class="sync-floor-chip ${active}" data-sync-floor="${floor}">${floor}</button>`;
+            })
+            .join("");
+    }
+
+    async function loadSyncFloorsForSelectedBlocks() {
+        if (!syncCatalogFloorsList) return;
+        const pickedBlocks = getSelectedSourceBlocks();
+        if (!pickedBlocks.length) {
+            syncAvailableFloors = [];
+            syncSelectedFloors = new Set();
+            syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Сначала выберите блок</div>';
+            return;
+        }
+        syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Загрузка этажей…</div>';
+        const params = new URLSearchParams();
+        params.set("blocks", pickedBlocks.join(","));
+        const floorsRes = await API.get(`/api/sync/floors?${params.toString()}`);
+        if (!floorsRes.ok || !floorsRes.data?.success || !Array.isArray(floorsRes.data.floors)) {
+            syncAvailableFloors = [];
+            syncSelectedFloors = new Set();
+            syncCatalogFloorsList.innerHTML = '<div class="text-danger small">Не удалось загрузить этажи</div>';
+            showToastMessage(floorsRes.data?.error || "Не удалось загрузить этажи", "danger");
+            return;
+        }
+        syncAvailableFloors = floorsRes.data.floors
+            .map((x) => String(x || "").trim().toUpperCase())
+            .filter(Boolean);
+        const lastFloors = (localStorage.getItem(SYNC_LAST_FLOORS_KEY) || "")
+            .split(",")
+            .map((x) => x.trim().toUpperCase())
+            .filter(Boolean);
+        const initialFloors = lastFloors.filter((x) => syncAvailableFloors.includes(x));
+        syncSelectedFloors = new Set(initialFloors.length ? initialFloors.slice(0, 1) : syncAvailableFloors.slice(0, 1));
+        renderSyncFloorsSelector();
+    }
+
     async function openSyncCatalogModal() {
         if (!syncCatalogBlocksList) return;
         syncCatalogBlocksList.innerHTML = '<div class="text-muted small">Загрузка блоков…</div>';
+        if (syncCatalogFloorsList) {
+            syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Сначала выберите блок</div>';
+        }
         syncAvailableBlocks = [];
         const blocksRes = await API.get("/api/sync/blocks");
         if (!blocksRes.ok || !blocksRes.data?.success || !Array.isArray(blocksRes.data.blocks)) {
@@ -923,6 +957,7 @@ function initWorkPage() {
             : syncBlockGroups.slice(0, 2).map((g) => g.groupCode);
         syncSelectedGroupCodes = new Set(initialGroups);
         renderSyncBlocksSelector();
+        await loadSyncFloorsForSelectedBlocks();
         if (syncCatalogModal) syncCatalogModal.show();
     }
 
@@ -942,7 +977,7 @@ function initWorkPage() {
 
     let placeSyncInProgress = false;
 
-    async function syncPlacesInChunks({ forceFull = false, silent = false, blocks = [] } = {}) {
+    async function syncPlacesInChunks({ forceFull = false, silent = false, blocks = [], floors = [] } = {}) {
         if (placeSyncInProgress) return;
         if (!navigator.onLine) {
             if (!silent) showToastMessage("Нет сети для синхронизации", "warning");
@@ -952,8 +987,12 @@ function initWorkPage() {
         const normalizedBlocks = Array.isArray(blocks)
             ? Array.from(new Set(blocks.map((b) => String(b || "").trim().toUpperCase()).filter(Boolean)))
             : [];
+        const normalizedFloors = Array.isArray(floors)
+            ? Array.from(new Set(floors.map((f) => String(f || "").trim().toUpperCase()).filter(Boolean)))
+            : [];
         const blocksKeyPart = normalizedBlocks.length ? normalizedBlocks.join("|") : "ALL";
-        const cursorKey = `${SYNC_CURSOR_KEY}:${blocksKeyPart}`;
+        const floorsKeyPart = normalizedFloors.length ? normalizedFloors.join("|") : "ALL";
+        const cursorKey = `${SYNC_CURSOR_KEY}:${blocksKeyPart}:${floorsKeyPart}`;
         placeSyncInProgress = true;
         const globalProgressBar = document.getElementById("globalProgressBar");
         if (globalProgressBar) globalProgressBar.classList.remove("d-none");
@@ -968,7 +1007,8 @@ function initWorkPage() {
             let limit = 2000;
             let rateLimitRetries = 0;
             if (normalizedBlocks.length) {
-                setCatalogSyncStatus(`Синхронизация: ${normalizedBlocks.join(", ")}`, "secondary");
+                const floorSuffix = normalizedFloors.length ? `, этаж ${normalizedFloors.join(", ")}` : "";
+                setCatalogSyncStatus(`Синхронизация: ${normalizedBlocks.join(", ")}${floorSuffix}`, "secondary");
             }
             while (true) {
                 const t0 = performance.now ? performance.now() : Date.now();
@@ -976,6 +1016,7 @@ function initWorkPage() {
                 params.set("limit", String(limit));
                 if (since != null) params.set("since_id", String(since));
                 if (normalizedBlocks.length) params.set("blocks", normalizedBlocks.join(","));
+                if (normalizedFloors.length) params.set("floors", normalizedFloors.join(","));
                 const { ok, status, data } = await API.get(`/api/sync?${params.toString()}`);
                 const elapsed = (performance.now ? performance.now() : Date.now()) - t0;
                 if (status === 429) {
@@ -1019,15 +1060,22 @@ function initWorkPage() {
             if (since != null) localStorage.setItem(cursorKey, String(since));
             localStorage.setItem(SYNC_LAST_AT_KEY, new Date().toISOString());
             localStorage.setItem(SYNC_LAST_BLOCKS_KEY, normalizedBlocks.join(","));
+            localStorage.setItem(SYNC_LAST_FLOORS_KEY, normalizedFloors.join(","));
             if (lastSyncLabel) {
-                const scope = normalizedBlocks.length ? ` (${normalizedBlocks.join(", ")})` : "";
+                const scopeParts = [];
+                if (normalizedBlocks.length) scopeParts.push(normalizedBlocks.join(", "));
+                if (normalizedFloors.length) scopeParts.push(`этаж ${normalizedFloors.join(", ")}`);
+                const scope = scopeParts.length ? ` (${scopeParts.join("; ")})` : "";
                 lastSyncLabel.textContent = `Синхронизация: ${formatDate(new Date())}${scope}`;
             }
             if (!hadSyncError) {
                 setCatalogSyncStatus("Справочник синхронизирован", "success");
                 if (!silent) {
                     if (totalLoaded > 0) {
-                        const suffix = normalizedBlocks.length ? ` (${normalizedBlocks.join(", ")})` : "";
+                        const suffixParts = [];
+                        if (normalizedBlocks.length) suffixParts.push(normalizedBlocks.join(", "));
+                        if (normalizedFloors.length) suffixParts.push(`этаж ${normalizedFloors.join(", ")}`);
+                        const suffix = suffixParts.length ? ` (${suffixParts.join("; ")})` : "";
                         showToastMessage(`Синхронизировано ${totalLoaded} МХ${suffix}`, "success");
                     }
                     else showToastMessage("Синхронизация актуальна", "info");
@@ -2450,7 +2498,7 @@ function initWorkPage() {
     syncCatalogBtn?.addEventListener("click", () => {
         openSyncCatalogModal();
     });
-    syncCatalogBlocksList?.addEventListener("click", (event) => {
+    syncCatalogBlocksList?.addEventListener("click", async (event) => {
         const btn = event.target.closest("[data-sync-group]");
         if (!btn) return;
         const groupCode = String(btn.dataset.syncGroup || "").toUpperCase();
@@ -2458,18 +2506,30 @@ function initWorkPage() {
         if (syncSelectedGroupCodes.has(groupCode)) syncSelectedGroupCodes.delete(groupCode);
         else syncSelectedGroupCodes.add(groupCode);
         renderSyncBlocksSelector();
+        await loadSyncFloorsForSelectedBlocks();
+    });
+    syncCatalogFloorsList?.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-sync-floor]");
+        if (!btn) return;
+        const floor = String(btn.dataset.syncFloor || "").toUpperCase();
+        if (!floor) return;
+        // Выбор одного этажа за раз, чтобы не перегружать кэш.
+        syncSelectedFloors = new Set([floor]);
+        renderSyncFloorsSelector();
     });
     syncCatalogApplyBtn?.addEventListener("click", () => {
-        const pickedGroups = Array.from(syncSelectedGroupCodes);
-        const picked = syncBlockGroups
-            .filter((g) => pickedGroups.includes(g.groupCode))
-            .flatMap((g) => g.sourceCodes);
+        const picked = getSelectedSourceBlocks();
+        const pickedFloors = Array.from(syncSelectedFloors);
         if (!picked.length) {
             showToastMessage("Выберите хотя бы один блок", "warning");
             return;
         }
+        if (!pickedFloors.length) {
+            showToastMessage("Выберите этаж", "warning");
+            return;
+        }
         if (syncCatalogModal) syncCatalogModal.hide();
-        syncPlacesInChunks({ forceFull: true, silent: false, blocks: picked });
+        syncPlacesInChunks({ forceFull: true, silent: false, blocks: picked, floors: pickedFloors });
     });
     syncCatalogFullBtn?.addEventListener("click", () => {
         if (syncCatalogModal) syncCatalogModal.hide();

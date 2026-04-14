@@ -423,6 +423,16 @@ def ensure_tasks_table():
                 CREATE INDEX IF NOT EXISTS idx_warehouse_places_wh_id_mx_code_norm
                 ON warehouse_places(wh_id, UPPER(TRIM(mx_code)))
             """)
+            # Индекс под синхронизацию справочника по 2 условиям:
+            # warehouse_name + floor, с пагинацией/сортировкой по mx_id.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_warehouse_places_sync_wh_floor_mx
+                ON warehouse_places(
+                    UPPER(TRIM(warehouse_name)),
+                    UPPER(TRIM(CAST(floor AS TEXT))),
+                    mx_id
+                )
+            """)
 
             # Автоочистка старых отчётов: файлы > 30 дней удаляем из reports.file_data,
             # но строку метаданных оставляем (чтобы история в админке не пропадала)
@@ -1993,6 +2003,7 @@ def sync_data():
         since_id_raw = request.args.get("since_id")
         limit_raw = request.args.get("limit")
         blocks_raw = (request.args.get("blocks") or "").strip()
+        floors_raw = (request.args.get("floors") or "").strip()
         try:
             since_id = int(since_id_raw) if since_id_raw not in (None, "") else None
         except ValueError:
@@ -2005,15 +2016,27 @@ def sync_data():
             limit = max(1, min(limit, 20000))
         blocks = []
         if blocks_raw:
-            # Поддержка разделителей: запятая/пробел/точка с запятой.
-            tokens = re.split(r"[,\s;]+", blocks_raw)
+            # Поддержка разделителей: запятая/точка с запятой/перенос строки.
+            # ВАЖНО: не делим по пробелу, т.к. warehouse_name может быть "Электросталь 10".
+            tokens = re.split(r"[,;\n\r]+", blocks_raw)
             blocks = sorted({
-                t.strip().upper().split(".", 1)[0]
+                t.strip().upper()
                 for t in tokens
                 if t and t.strip()
             })
             if len(blocks) > 50:
                 return jsonify({"error": "Слишком много блоков в одном запросе"}), 400
+        floors = []
+        if floors_raw:
+            # Этаж фильтруем по колонке FLOOR в warehouse_places.
+            tokens = re.split(r"[,;\n\r]+", floors_raw)
+            floors = sorted({
+                t.strip().upper()
+                for t in tokens
+                if t and t.strip()
+            })
+            if len(floors) > 50:
+                return jsonify({"error": "Слишком много этажей в одном запросе"}), 400
 
         conn = get_db()
         with conn.cursor() as cur:
@@ -2027,14 +2050,11 @@ def sync_data():
                 query += " AND mx_id > %s"
                 params.append(since_id)
             if blocks:
-                query += """
-                    AND EXISTS (
-                        SELECT 1
-                        FROM unnest(%s::text[]) AS b(prefix)
-                        WHERE UPPER(TRIM(SPLIT_PART(warehouse_places.mx_code, '.', 1))) = b.prefix
-                    )
-                """
+                query += " AND UPPER(TRIM(warehouse_places.warehouse_name)) = ANY(%s::text[])"
                 params.append(blocks)
+            if floors:
+                query += " AND UPPER(TRIM(CAST(warehouse_places.floor AS TEXT))) = ANY(%s::text[])"
+                params.append(floors)
             query += " ORDER BY mx_id"
             if limit is not None:
                 query += " LIMIT %s"
@@ -2053,6 +2073,7 @@ def sync_data():
             'next_since_id': data[-1]['place_cod'] if data else since_id,
             'has_more': bool(limit and len(data) >= limit),
             'blocks': blocks,
+            'floors': floors,
             'timestamp': datetime.now().isoformat()
         })
     
@@ -2063,7 +2084,7 @@ def sync_data():
 
 @app.route('/api/sync/blocks', methods=['GET'])
 def get_sync_blocks():
-    """Список доступных блоков МХ (префикс до первой точки, например Э8/Э10)."""
+    """Список доступных блоков из warehouse_name."""
     allowed, retry_after = _check_rate_limit("sync_blocks", limit=30, window_seconds=60)
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
@@ -2072,10 +2093,10 @@ def get_sync_blocks():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT UPPER(TRIM(SPLIT_PART(mx_code, '.', 1))) AS block
+                SELECT DISTINCT UPPER(TRIM(warehouse_name)) AS block
                 FROM warehouse_places
-                WHERE mx_code IS NOT NULL
-                  AND mx_code <> ''
+                WHERE warehouse_name IS NOT NULL
+                  AND TRIM(warehouse_name) <> ''
                 ORDER BY block
                 """
             )
@@ -2083,6 +2104,48 @@ def get_sync_blocks():
         return jsonify({"success": True, "blocks": blocks})
     except Exception as e:
         logger.exception("Ошибка получения списка блоков для синхронизации")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sync/floors', methods=['GET'])
+def get_sync_floors():
+    """Список доступных этажей для выбранных блоков."""
+    allowed, retry_after = _check_rate_limit("sync_floors", limit=60, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
+    try:
+        blocks_raw = (request.args.get("blocks") or "").strip()
+        blocks = []
+        if blocks_raw:
+            tokens = re.split(r"[,;\n\r]+", blocks_raw)
+            blocks = sorted({
+                t.strip().upper()
+                for t in tokens
+                if t and t.strip()
+            })
+            if len(blocks) > 50:
+                return jsonify({"error": "Слишком много блоков в одном запросе"}), 400
+
+        conn = get_db()
+        with conn.cursor() as cur:
+            query = """
+                SELECT DISTINCT UPPER(TRIM(CAST(floor AS TEXT))) AS floor
+                FROM warehouse_places
+                WHERE mx_code IS NOT NULL
+                  AND mx_code <> ''
+                  AND floor IS NOT NULL
+                  AND TRIM(CAST(floor AS TEXT)) <> ''
+            """
+            params = []
+            if blocks:
+                query += " AND UPPER(TRIM(warehouse_places.warehouse_name)) = ANY(%s::text[])"
+                params.append(blocks)
+            query += " ORDER BY floor"
+            cur.execute(query, tuple(params))
+            floors = [row["floor"] for row in cur.fetchall() if row.get("floor")]
+        return jsonify({"success": True, "blocks": blocks, "floors": floors})
+    except Exception as e:
+        logger.exception("Ошибка получения этажей для синхронизации")
         return jsonify({"error": str(e)}), 500
 
 

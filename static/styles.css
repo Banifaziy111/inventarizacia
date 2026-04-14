@@ -1389,6 +1389,31 @@ button:focus-visible,
     font-size: .75rem;
     opacity: .85;
 }
+.sync-floors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+    gap: 8px;
+}
+.sync-floor-chip {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    text-align: center;
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 600;
+}
+.sync-floor-chip:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+.sync-floor-chip.active {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+}
 
 .quick-error-wrap {
     border: 1px dashed var(--border);

@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=24">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=25">
     {% block head_extra %}{% endblock %}
 </head>
 <body data-page="{{ request.endpoint or '' }}" data-badge="{{ employee_badge|default('', true) }}" data-theme="light" data-bs-theme="light">
@@ -120,7 +120,7 @@
 </div>
 
 <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
-<script type="module" src="{{ url_for('static', filename='app.js') }}?v=24"></script>
+<script type="module" src="{{ url_for('static', filename='app.js') }}?v=25"></script>
 <script>
 if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
