@@ -709,7 +709,9 @@ function initWorkPage() {
 
     const badgeLabel = document.getElementById("currentBadge");
     const lastSyncLabel = document.getElementById("lastSyncLabel");
+    const catalogSyncStatus = document.getElementById("catalogSyncStatus");
     const newShiftBtn = document.getElementById("newShiftBtn");
+    const syncCatalogBtn = document.getElementById("syncCatalogBtn");
     const newShiftBtnScanOnly = document.getElementById("newShiftBtnScanOnly");
     const placeForm = document.getElementById("scanForm");
     const placeInput = document.getElementById("placeInput");
@@ -784,10 +786,17 @@ function initWorkPage() {
     const miniRecentScansHint = document.getElementById("miniRecentScansHint");
 
     badgeLabel.textContent = badge;
+    function setCatalogSyncStatus(text, type = "success") {
+        if (!catalogSyncStatus) return;
+        catalogSyncStatus.textContent = text;
+        catalogSyncStatus.classList.remove("d-none", "text-bg-success", "text-bg-warning", "text-bg-danger", "text-bg-secondary");
+        catalogSyncStatus.classList.add(`text-bg-${type}`);
+    }
     try {
         const lastAt = localStorage.getItem(SYNC_LAST_AT_KEY);
         if (lastAt && lastSyncLabel) {
             lastSyncLabel.textContent = `Синхронизация: ${formatDate(lastAt)}`;
+            setCatalogSyncStatus("Справочник синхронизирован", "success");
         }
     } catch (_) {}
 
@@ -797,11 +806,14 @@ function initWorkPage() {
         if (placeSyncInProgress) return;
         if (!navigator.onLine) {
             if (!silent) showToastMessage("Нет сети для синхронизации", "warning");
+            setCatalogSyncStatus("Нет сети для синхронизации", "warning");
             return;
         }
         placeSyncInProgress = true;
         const globalProgressBar = document.getElementById("globalProgressBar");
         if (globalProgressBar) globalProgressBar.classList.remove("d-none");
+        let totalLoaded = 0;
+        let hadSyncError = false;
         try {
             let since = null;
             if (!forceFull) {
@@ -809,7 +821,6 @@ function initWorkPage() {
                 if (raw && /^\d+$/.test(raw)) since = Number(raw);
             }
             let limit = 700;
-            let totalLoaded = 0;
             let pages = 0;
             while (pages < 8) {
                 pages += 1;
@@ -821,6 +832,8 @@ function initWorkPage() {
                 const elapsed = (performance.now ? performance.now() : Date.now()) - t0;
                 if (!ok || data?.error) {
                     if (!silent) showToastMessage(data?.error || "Ошибка синхронизации", "danger");
+                    hadSyncError = true;
+                    setCatalogSyncStatus("Ошибка синхронизации", "danger");
                     break;
                 }
                 const rows = data?.data || [];
@@ -843,10 +856,14 @@ function initWorkPage() {
             if (lastSyncLabel) {
                 lastSyncLabel.textContent = `Синхронизация: ${formatDate(new Date())}`;
             }
-            if (!silent) {
-                if (totalLoaded > 0) showToastMessage(`Синхронизировано ${totalLoaded} МХ`, "success");
-                else showToastMessage("Синхронизация актуальна", "info");
+            if (!hadSyncError) {
+                setCatalogSyncStatus("Справочник синхронизирован", "success");
+                if (!silent) {
+                    if (totalLoaded > 0) showToastMessage(`Синхронизировано ${totalLoaded} МХ`, "success");
+                    else showToastMessage("Синхронизация актуальна", "info");
+                }
             }
+            return { ok: !hadSyncError, totalLoaded };
         } finally {
             if (globalProgressBar) globalProgressBar.classList.add("d-none");
             placeSyncInProgress = false;
@@ -2259,6 +2276,9 @@ function initWorkPage() {
     });
     quickScanModeCheck?.addEventListener("change", () => {
         state.quickScanMode = !!quickScanModeCheck?.checked;
+    });
+    syncCatalogBtn?.addEventListener("click", (event) => {
+        syncPlacesInChunks({ forceFull: !!event?.shiftKey, silent: false });
     });
     refreshPlaceBtn?.addEventListener("click", (event) => {
         if (state.lastMxCode) {

@@ -26,6 +26,9 @@
                     <button class="btn btn-sm btn-outline-secondary" id="newShiftBtn" title="Начать новую смену">
                         <i class="bi bi-clock-history me-1"></i>Новая смена
                     </button>
+                    <button class="btn btn-sm btn-outline-primary" id="syncCatalogBtn" title="Синхронизировать справочник МХ">
+                        <i class="bi bi-cloud-download me-1"></i>Справочник
+                    </button>
                     <button class="btn btn-sm btn-outline-secondary" id="refreshPlaceBtn">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
@@ -34,6 +37,7 @@
         </div>
         <p class="small text-muted mt-1 mb-0 d-flex align-items-center gap-2 flex-wrap">
             <span id="lastSyncLabel">Синхронизация: —</span>
+            <span id="catalogSyncStatus" class="badge text-bg-success d-none">Справочник синхронизирован</span>
             <span class="today-saved-wrap">
                 <span class="text-muted">·</span>
                 <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
