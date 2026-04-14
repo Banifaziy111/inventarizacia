@@ -710,6 +710,7 @@ function initWorkPage() {
     const statusLabel = document.getElementById("statusLabel");
     const commentInput = document.getElementById("commentInput");
     const duplicateDetailsBlock = document.getElementById("duplicateDetailsBlock");
+    const duplicateFloorInput = document.getElementById("duplicateFloorInput");
     const duplicateRowInput = document.getElementById("duplicateRowInput");
     const duplicateShelfInput = document.getElementById("duplicateShelfInput");
     const discrepancyReasonBlock = document.getElementById("discrepancyReasonBlock");
@@ -971,6 +972,17 @@ function initWorkPage() {
         if (!duplicateDetailsBlock) return;
         const on = !!state.allowDuplicateForCurrentPlace;
         duplicateDetailsBlock.classList.toggle("d-none", !on);
+        if (on) {
+            // Для задвойки автоматически фиксируем статус "Ошибка",
+            // но не требуем отдельный выбор причины.
+            setStatus("error");
+            if (discrepancyReasonBlock) discrepancyReasonBlock.classList.add("d-none");
+            if (discrepancyReasonSelect) discrepancyReasonSelect.value = "";
+            hideReasonDetail();
+            if (otherReasonBlock) otherReasonBlock.classList.add("d-none");
+            if (otherReasonInput) otherReasonInput.value = "";
+            if (quickReasonChips) quickReasonChips.innerHTML = "";
+        }
     }
 
     function parseDuplicateField(value) {
@@ -999,7 +1011,7 @@ function initWorkPage() {
 
         state.allowDuplicateForCurrentPlace = true;
         syncDuplicateDetailsVisibility();
-        setTimeout(() => duplicateRowInput?.focus(), 0);
+        setTimeout(() => duplicateFloorInput?.focus(), 0);
         return "confirmed";
     }
 
@@ -1544,6 +1556,7 @@ function initWorkPage() {
         if (placeCard) placeCard.classList.remove("is-loaded");
         state.lastMxCode = null;
         state.allowDuplicateForCurrentPlace = false;
+        if (duplicateFloorInput) duplicateFloorInput.value = "";
         if (duplicateRowInput) duplicateRowInput.value = "";
         if (duplicateShelfInput) duplicateShelfInput.value = "";
         syncDuplicateDetailsVisibility();
@@ -1715,7 +1728,9 @@ function initWorkPage() {
         }
 
         // В режиме «Только скан» для Совпадает/Ошибка не требуем причину
-        const skipReasonValidation = state.scanOnlyMode && (state.currentStatus === 'ok' || state.currentStatus === 'error');
+        const skipReasonValidation =
+            state.allowDuplicateForCurrentPlace
+            || (state.scanOnlyMode && (state.currentStatus === 'ok' || state.currentStatus === 'error'));
         if (!skipReasonValidation && state.currentStatus && state.currentStatus !== 'ok') {
             if (!discrepancyReasonSelect?.value) {
                 showAlert(placeAlert, "Выберите причину расхождения");
@@ -1724,22 +1739,25 @@ function initWorkPage() {
             }
         }
 
+        let duplicateFloor = null;
         let duplicateRow = null;
         let duplicateShelf = null;
         if (state.allowDuplicateForCurrentPlace) {
+            duplicateFloor = parseDuplicateField(duplicateFloorInput?.value);
             duplicateRow = parseDuplicateField(duplicateRowInput?.value);
             duplicateShelf = parseDuplicateField(duplicateShelfInput?.value);
-            if (duplicateRow == null || duplicateShelf == null) {
-                showAlert(placeAlert, "Для задвойки укажите ряд и номер стеллажа", "warning");
-                logEvent("Для задвойки не заполнены ряд/стеллаж", "warning");
-                duplicateRowInput?.focus();
+            if (duplicateFloor == null || duplicateRow == null || duplicateShelf == null) {
+                showAlert(placeAlert, "Для задвойки укажите этаж, ряд и номер стеллажа", "warning");
+                logEvent("Для задвойки не заполнены этаж/ряд/стеллаж", "warning");
+                duplicateFloorInput?.focus();
                 return;
             }
         }
 
         // Формируем причину: основной текст + подпункт (выпадающий или поле ввода) или «Другое»
         let discrepancyReason = '';
-        if (skipReasonValidation && state.currentStatus === 'error') discrepancyReason = null;
+        if (state.allowDuplicateForCurrentPlace) discrepancyReason = 'Задвойка';
+        else if (skipReasonValidation && state.currentStatus === 'error') discrepancyReason = null;
         else if (discrepancyReasonSelect?.value) {
             if (discrepancyReasonSelect.value === 'other') {
                 discrepancyReason = otherReasonInput?.value?.trim() || 'Другое';
@@ -1764,6 +1782,7 @@ function initWorkPage() {
             discrepancy_reason: discrepancyReason || null,
             comment: commentInput?.value?.trim() || null,
             force_duplicate: !!state.allowDuplicateForCurrentPlace,
+            duplicate_floor: duplicateFloor,
             duplicate_row: duplicateRow,
             duplicate_shelf: duplicateShelf,
             // Для обратной совместимости отправляем первое фото как photo,
@@ -1795,11 +1814,12 @@ function initWorkPage() {
                     payload.force_duplicate = true;
                     state.allowDuplicateForCurrentPlace = true;
                     syncDuplicateDetailsVisibility();
+                    payload.duplicate_floor = parseDuplicateField(duplicateFloorInput?.value);
                     payload.duplicate_row = parseDuplicateField(duplicateRowInput?.value);
                     payload.duplicate_shelf = parseDuplicateField(duplicateShelfInput?.value);
-                    if (payload.duplicate_row == null || payload.duplicate_shelf == null) {
-                        showAlert(placeAlert, "Подтвердите задвойку и укажите ряд/стеллаж", "warning");
-                        duplicateRowInput?.focus();
+                    if (payload.duplicate_floor == null || payload.duplicate_row == null || payload.duplicate_shelf == null) {
+                        showAlert(placeAlert, "Подтвердите задвойку и укажите этаж/ряд/стеллаж", "warning");
+                        duplicateFloorInput?.focus();
                         return;
                     }
                     const secondTry = await API.post("/api/scan/complete", payload);

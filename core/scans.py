@@ -61,6 +61,7 @@ def complete_scan_handler(get_db_fn):
     photos = data.get("photos") or []
     photo_raw = data.get("photo")
     force_duplicate = bool(data.get("force_duplicate"))
+    duplicate_floor = data.get("duplicate_floor")
     duplicate_row = data.get("duplicate_row")
     duplicate_shelf = data.get("duplicate_shelf")
 
@@ -74,8 +75,14 @@ def complete_scan_handler(get_db_fn):
     except (TypeError, ValueError):
         return jsonify({"error": "Некорректный place_cod"}), 400
 
+    duplicate_floor_int = None
     duplicate_row_int = None
     duplicate_shelf_int = None
+    if duplicate_floor not in (None, ""):
+        try:
+            duplicate_floor_int = int(duplicate_floor)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Некорректный этаж для задвойки"}), 400
     if duplicate_row not in (None, ""):
         try:
             duplicate_row_int = int(duplicate_row)
@@ -143,10 +150,10 @@ def complete_scan_handler(get_db_fn):
             )
             if cur.fetchone():
                 if force_duplicate:
-                    if duplicate_row_int is None or duplicate_shelf_int is None:
+                    if duplicate_floor_int is None or duplicate_row_int is None or duplicate_shelf_int is None:
                         return jsonify(
                             {
-                                "error": "Для задвойки укажите ряд и номер стеллажа",
+                                "error": "Для задвойки укажите этаж, ряд и номер стеллажа",
                                 "code": "duplicate_details_required",
                             }
                         ), 400
@@ -154,8 +161,12 @@ def complete_scan_handler(get_db_fn):
                     marker = "[Задвойка подтверждена]"
                     comment_text = (comment or "").strip()
                     if marker not in comment_text:
-                        details = f"{marker} Ряд: {duplicate_row_int}, Стеллаж: {duplicate_shelf_int}"
+                        details = f"{marker} Этаж: {duplicate_floor_int}, Ряд: {duplicate_row_int}, Стеллаж: {duplicate_shelf_int}"
                         comment = f"{comment_text} {details}".strip() if comment_text else details
+                    status = "error"
+                    has_discrepancy = True
+                    if not discrepancy_reason:
+                        discrepancy_reason = "Задвойка"
                 else:
                     return jsonify(
                         {
@@ -170,8 +181,8 @@ def complete_scan_handler(get_db_fn):
                 """
                 INSERT INTO inventory_results
                 (badge, place_cod, place_name, qty_shk_db, qty_shk_fact, status, has_discrepancy,
-                 photo_data, photo_filename, discrepancy_reason, comment, duplicate_row_num, duplicate_shelf_num)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 photo_data, photo_filename, discrepancy_reason, comment, duplicate_floor_num, duplicate_row_num, duplicate_shelf_num)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING result_id, created_at
                 """,
                 (
@@ -186,6 +197,7 @@ def complete_scan_handler(get_db_fn):
                     photo_filename,
                     discrepancy_reason or None,
                     comment or None,
+                    duplicate_floor_int if force_duplicate else None,
                     duplicate_row_int if force_duplicate else None,
                     duplicate_shelf_int if force_duplicate else None,
                 ),
@@ -219,6 +231,7 @@ def complete_scan_handler(get_db_fn):
                     "has_discrepancy": has_discrepancy,
                     "has_photo": photo_data is not None,
                     "is_duplicate": force_duplicate,
+                    "duplicate_floor_num": duplicate_floor_int if force_duplicate else None,
                     "duplicate_row_num": duplicate_row_int if force_duplicate else None,
                     "duplicate_shelf_num": duplicate_shelf_int if force_duplicate else None,
                     "comment": comment,

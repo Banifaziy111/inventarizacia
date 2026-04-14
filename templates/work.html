@@ -239,14 +239,17 @@
             <div class="alert alert-warning border d-none py-2 mb-3" id="duplicateDetailsBlock">
                 <label class="form-label fw-semibold small mb-2">Подтверждена задвойка — укажите текущее место</label>
                 <div class="row g-2">
+                    <div class="col-4">
+                        <input type="number" min="0" class="form-control form-control-sm" id="duplicateFloorInput" placeholder="Этаж">
+                    </div>
                     <div class="col-6">
                         <input type="number" min="0" class="form-control form-control-sm" id="duplicateRowInput" placeholder="Ряд">
                     </div>
-                    <div class="col-6">
+                    <div class="col-6 col-md-4">
                         <input type="number" min="0" class="form-control form-control-sm" id="duplicateShelfInput" placeholder="Стеллаж">
                     </div>
                 </div>
-                <div class="form-text mt-1 mb-0">Без этих данных задвойка не сохранится</div>
+                <div class="form-text mt-1 mb-0">Без этажа, ряда и стеллажа задвойка не сохранится</div>
             </div>
 
             <div class="row g-3">
