@@ -5,283 +5,367 @@
 {% endblock %}
 
 {% block title %}Рабочее место{% endblock %}
+{% block page_title %}Рабочее место{% endblock %}
 
 {% block content %}
-<div class="work-blocks">
-<section class="work-block content-fade-in">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <div>
-            <h1 class="h4 mb-0 heading-gradient">Сканирование мест</h1>
-            <p class="text-muted small mb-0">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
-        </div>
-        <div class="d-flex gap-2 align-items-center">
-            <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Отсутствует">
-                <input class="form-check-input" type="checkbox" id="scanOnlyToggle">
-                <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
-            </div>
-            <div class="full-mode-only d-flex gap-2">
-                <button class="btn btn-primary btn-sm" id="newShiftBtn" title="Начать новую смену — отчёты с нуля">
-                    <i class="bi bi-clock-history me-1"></i>Новая смена
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" id="refreshPlaceBtn">Обновить карточку</button>
-            </div>
-        </div>
-    </div>
-    <p class="text-muted small mt-1 mb-0 d-flex align-items-center gap-2 flex-wrap">
-        <span id="lastSyncLabel">Синхронизация: —</span>
-        <span class="today-saved-wrap">
-            <span class="text-muted">·</span>
-            <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
-        </span>
-    </p>
-    <div class="offline-queue-bar alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 py-2 px-3 mt-2 mb-0" id="offlineQueueBar" role="status">
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-cloud-arrow-up fs-5"></i>
-            <span>В очереди: <strong id="offlineQueueCount">0</strong> неотправленных сканов.</span>
-            <span class="small opacity-75" id="offlineQueueHint">При появлении сети нажмите «Синхронизировать».</span>
-        </div>
-        <button type="button" class="btn btn-sm btn-warning" id="offlineQueueSyncBtn">
-            <i class="bi bi-arrow-repeat me-1"></i>Синхронизировать
-        </button>
-    </div>
-</section>
+<div class="work-blocks content-fade-in">
 
-<section class="card work-block scan-hero">
-    <div class="card-body p-4">
-        <div class="row g-4">
-            <div class="col-lg-5">
-                <form id="scanForm" class="needs-validation" novalidate>
-                    <label class="form-label fw-semibold" for="placeInput">Код МХ</label>
-                    <div class="input-group input-group-lg mb-2">
-                        <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
-                        <input type="text" class="form-control" id="placeInput" name="place"
-                               placeholder="Э6.01.01.01 или 978086748"
-                               pattern="^[А-ЯЁA-Z0-9.\-]+$" inputmode="text" autocomplete="off" required autofocus>
-                    </div>
-                    <div class="d-flex gap-2 flex-wrap align-items-center">
-                        <button type="submit" class="btn btn-primary">Получить</button>
-                        <button type="button" class="btn btn-outline-secondary" id="clearPlaceBtn">Очистить</button>
-                        <button type="button" class="btn btn-outline-primary btn-qr" id="openQrScannerBtn">
-                            <i class="bi bi-qr-code me-1"></i>QR
-                        </button>
-                        <button type="button" class="repeat-mx-chip d-none" id="repeatMxChip" title="Загрузить этот МХ снова">
-                            <i class="bi bi-arrow-repeat"></i>
-                            <span id="repeatMxChipLabel">Повторить</span>
-                        </button>
-                    </div>
-                    <p class="form-text small mt-2 mb-0">Блок: Э + номер (Э6, Э10). Сканер, камера или ввод вручную.</p>
-                </form>
+    {# ── Шапка страницы ── #}
+    <div class="work-block">
+        <div class="page-header">
+            <div>
+                <h1 class="page-header-title">Сканирование мест</h1>
+                <p class="page-header-sub">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
             </div>
-            <div class="col-lg-7">
-                <div class="card h-100 border place-card-mx position-relative overflow-hidden" id="placeCard">
-                    <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint"><span class="swipe-hint-left">← Ошибка</span><span class="swipe-hint-right">Совпадает →</span></div>
-                    <div class="card-body place-card-body" id="placeCardBody">
-                        <div class="d-flex justify-content-between align-items-start mb-3">
-                            <div class="d-flex align-items-center gap-2 flex-wrap">
-                                <h2 class="h5 fw-bold mb-0" id="placeTitle">—</h2>
-                                <span class="badge d-none" id="placeAdminStatusBadge"></span>
-                            </div>
-                            <span class="small text-muted" id="placeUpdatedLabel">—</span>
-                        </div>
-                        <div class="row g-2 mb-3">
-                            <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Этаж</div>
-                                    <div class="fw-semibold place-value-empty" id="mxFloor">—</div>
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Ряд</div>
-                                    <div class="fw-semibold place-value-empty" id="mxRow">—</div>
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Секция</div>
-                                    <div class="fw-semibold place-value-empty" id="mxSection">—</div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6 col-lg-4">
-                                <div class="p-2 rounded small info-block">
-                                    <div class="text-muted">Статус МХ</div>
-                                    <div class="fw-semibold place-value-empty" id="mxStatus">—</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="place-card-empty-state text-center py-3" id="placeCardEmptyHint">
-                            <i class="bi bi-upc-scan empty-state-icon d-block mb-2" aria-hidden="true"></i>
-                            <p class="place-card-empty-hint text-muted small mb-1 fw-semibold">Введите код МХ</p>
-                            <p class="place-card-empty-hint text-muted small mb-0">и нажмите «Получить» или отсканируйте штрихкод</p>
-                        </div>
-                        <div class="alert alert-info py-2 mb-0 d-none" id="placeAlert" role="alert"></div>
-                    </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Отсутствует">
+                    <input class="form-check-input" type="checkbox" id="scanOnlyToggle">
+                    <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
+                </div>
+                <div class="full-mode-only d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="newShiftBtn" title="Начать новую смену">
+                        <i class="bi bi-clock-history me-1"></i>Новая смена
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshPlaceBtn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
                 </div>
             </div>
         </div>
-        <div class="scan-only-only mt-3 d-none" id="scanOnlyActions">
-            <p class="small text-muted mb-2 text-center">Свайп по карточке или кнопки</p>
-            <div class="d-flex gap-3 justify-content-center flex-wrap">
-                <button type="button" class="btn btn-success btn-lg scan-only-btn touch-target" id="scanOnlyOkBtn" data-scan-status="ok">
-                    <i class="bi bi-check-circle-fill me-2"></i>Совпадает
-                </button>
-                <button type="button" class="btn btn-danger btn-lg scan-only-btn touch-target" id="scanOnlyErrorBtn" data-scan-status="error">
-                    <i class="bi bi-x-circle-fill me-2"></i>Ошибка
-                </button>
+        <p class="small text-muted mt-1 mb-0 d-flex align-items-center gap-2 flex-wrap">
+            <span id="lastSyncLabel">Синхронизация: —</span>
+            <span class="today-saved-wrap">
+                <span class="text-muted">·</span>
+                <span class="today-saved-pill ms-1" id="todaySavedCount" title="Сохранено за текущую сессию">0</span>
+            </span>
+        </p>
+        <div class="work-context-bar mt-2" id="workContextBar">
+            <span class="work-context-chip" id="contextModeChip"><i class="bi bi-bullseye"></i> Режим: стандарт</span>
+            <span class="work-context-chip" id="contextBlockChip"><i class="bi bi-grid-1x2"></i> Блок: —</span>
+            <span class="work-context-chip" id="contextFreshChip"><i class="bi bi-database-check"></i> Данные: —</span>
+            <span class="work-context-chip" id="lastScanAgoChip"><i class="bi bi-clock-history"></i> Последний скан: —</span>
+        </div>
+
+        {# Offline-плашка #}
+        <div class="offline-queue-bar alert alert-warning d-none align-items-center justify-content-between flex-wrap gap-2 py-2 px-3 mt-3 mb-0"
+             id="offlineQueueBar" role="status">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-cloud-arrow-up"></i>
+                <span>В очереди: <strong id="offlineQueueCount">0</strong> неотправленных сканов.</span>
+                <span class="small opacity-75" id="offlineQueueHint">При появлении сети нажмите «Синхронизировать».</span>
             </div>
-            <div class="text-center mt-2">
-                <button type="button" class="btn btn-outline-primary btn-sm" id="newShiftBtnScanOnly" title="Начать новую смену">
-                    <i class="bi bi-clock-history me-1"></i>Новая смена
-                </button>
-            </div>
+            <button type="button" class="btn btn-sm btn-warning" id="offlineQueueSyncBtn">
+                <i class="bi bi-arrow-repeat me-1"></i>Синхронизировать
+            </button>
         </div>
     </div>
-</section>
 
-<section class="card work-block full-mode-only">
-    <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h3 class="h6 mb-0 section-title"><i class="bi bi-clipboard-check"></i>Фиксация результата</h3>
-            <span class="badge bg-secondary" id="statusLabel">Не выбран</span>
-        </div>
-        <p class="small text-muted mb-2">Выберите статус проверки</p>
-        <div class="d-flex gap-2 mb-3 flex-wrap" id="statusButtons">
-            <button type="button" class="btn btn-outline-success" data-status="ok">
-                <i class="bi bi-check-circle me-1"></i>Совпадает
-            </button>
-            <button type="button" class="btn btn-outline-danger" data-status="error">
-                <i class="bi bi-exclamation-octagon me-1"></i>Ошибка
-            </button>
-            <button type="button" class="btn btn-outline-warning" data-status="missing">
-                <i class="bi bi-dash-circle me-1"></i>Отсутствует
-            </button>
-            <button type="button" class="btn btn-outline-warning" data-status="shelf_error">
-                <i class="bi bi-grid-3x3-gap me-1"></i>Поломалось
-            </button>
-        </div>
-        <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
-            <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
-            <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
-                <option value="">Выберите причину…</option>
-            </select>
-            <div id="reasonDetailRow" class="d-none mb-2">
-                <label class="form-label small text-muted" id="reasonDetailLabel"></label>
-                <select class="form-select form-select-sm d-none" id="reasonDetailSelect"></select>
-                <input type="text" class="form-control form-control-sm d-none" id="reasonDetailInput" placeholder="">
-            </div>
-            <div id="otherReasonBlock" class="d-none">
-                <input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…">
-            </div>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small">Комментарий</label>
-            <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
-        </div>
-        <div class="row g-3">
-            <div class="col-md-6">
-                <label class="form-label small">Фото</label>
-                <div class="border rounded p-3 text-center" id="photoDropzone">
-                    <input type="file" id="photoInput" accept="image/*" multiple hidden>
-                    <i class="bi bi-cloud-upload fs-2 d-block text-muted mb-1"></i>
-                    <p class="small text-muted mb-1">Перетащите или</p>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
-                    <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
-                </div>
-                <p class="small text-muted mt-1 mb-0" id="photoHint">Можно несколько фото</p>
-            </div>
-            <div class="col-md-6 d-flex flex-column justify-content-end">
-                <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" id="quickScanMode">
-                    <label class="form-check-label small" for="quickScanMode">Быстрый скан (авто-следующий МХ)</label>
-                </div>
-                <button type="button" class="btn btn-primary btn-lg" id="saveScanBtn">
-                    <span class="spinner-border spinner-border-sm me-2 d-none" id="saveSpinner" role="status"></span>
-                    Сохранить
-                </button>
-                <p class="small text-muted mt-2 mb-0">Карточка очистится после сохранения</p>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="card work-block full-mode-only card-history">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-            <h3 class="h6 mb-0 section-title"><i class="bi bi-clock-history"></i>История сканов</h3>
-            <div class="d-flex gap-1 align-items-center">
-                <input type="date" class="form-control form-control-sm" id="historyFrom" style="max-width:140px">
-                <input type="date" class="form-control form-control-sm" id="historyTo" style="max-width:140px">
-                <button type="button" class="btn btn-sm btn-outline-primary" id="historyReloadBtn">Показать</button>
-                <button type="button" class="btn btn-sm btn-outline-danger" id="historyDownloadBadBtn">Скачать ошибки</button>
-            </div>
-        </div>
-        <div class="table-responsive table-wrap-history">
-            <table class="table table-sm table-hover">
-                <thead>
-                <tr><th>Время</th><th>МХ</th><th>Статус</th><th>Расх.</th><th>Фото</th></tr>
-                </thead>
-                <tbody id="historyTableBody">
-                <tr class="history-empty-row">
-                    <td colspan="5" class="p-0 border-0">
-                        <div class="history-empty-state" id="historyEmptyState">
-                            <i class="bi bi-calendar3 history-empty-icon"></i>
-                            <p class="history-empty-title">Выберите период</p>
-                            <p class="history-empty-text">Укажите даты и нажмите «Показать» — здесь появятся ваши сканы</p>
+    {# ── Ввод кода + карточка МХ ── #}
+    <section class="card work-block">
+        <div class="card-body">
+            <div class="row g-4">
+                {# Форма ввода #}
+                <div class="col-lg-5">
+                    <form id="scanForm" class="needs-validation" novalidate>
+                        <label class="form-label" for="placeInput">Код МХ</label>
+                        <div class="input-group input-group-lg mb-2">
+                            <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
+                            <input type="text" class="form-control" id="placeInput" name="place"
+                                   placeholder="Э6.01.01.01 или 978086748"
+                                   pattern="^[А-ЯЁA-Z0-9.\-]+$" inputmode="text"
+                                   autocomplete="off" required autofocus>
                         </div>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</section>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <button type="submit" class="btn btn-primary btn-sm">Получить</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearPlaceBtn">Очистить</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm btn-qr" id="openQrScannerBtn">
+                                <i class="bi bi-qr-code me-1"></i>QR
+                            </button>
+                            <button type="button" class="repeat-mx-chip d-none" id="repeatMxChip" title="Загрузить этот МХ снова">
+                                <i class="bi bi-arrow-repeat"></i>
+                                <span id="repeatMxChipLabel">Повторить</span>
+                            </button>
+                        </div>
+                        <p class="form-text mt-2 mb-0">Блок: Э + номер (Э6, Э10).</p>
+                        <p class="form-text mt-1 mb-2">Горячие клавиши: 1=Совпадает, 2=Ошибка, 3=Отсутствует, Ctrl+Enter=Сохранить, Esc=Очистить.</p>
+                        <div class="mini-recent-scans mt-2" id="miniRecentScans">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="small fw-semibold">Последние 3 скана</span>
+                                <span class="small text-muted" id="miniRecentScansHint">—</span>
+                            </div>
+                            <div class="mini-recent-scans-list" id="miniRecentScansList">
+                                <div class="text-muted small">Пока нет сканов</div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
 
-<aside class="card work-block full-mode-only card-journal" id="notificationPanel">
-    <div class="card-body py-2">
-        <div class="d-flex justify-content-between align-items-center">
-            <span class="small fw-semibold section-title-inline"><i class="bi bi-journal-text me-1"></i>Журнал</span>
-            <button class="btn btn-link btn-sm p-0 text-muted" id="clearLogBtn">очистить</button>
+                {# Карточка МХ #}
+                <div class="col-lg-7">
+                    <div class="card h-100 place-card-mx position-relative overflow-hidden" id="placeCard">
+                        <div class="place-card-swipe-hint d-none" id="placeCardSwipeHint">
+                            <span class="swipe-hint-left">← Ошибка</span>
+                            <span class="swipe-hint-right">Совпадает →</span>
+                        </div>
+                        <div class="card-body place-card-body" id="placeCardBody">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <h2 class="h5 fw-bold mb-0" id="placeTitle">—</h2>
+                                    <span class="badge d-none" id="placeAdminStatusBadge"></span>
+                                </div>
+                                <span class="small text-muted" id="placeUpdatedLabel">—</span>
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-4">
+                                    <div class="p-2 rounded small info-block">
+                                        <div class="text-muted">Этаж</div>
+                                        <div class="fw-semibold place-value-empty" id="mxFloor">—</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 rounded small info-block">
+                                        <div class="text-muted">Ряд</div>
+                                        <div class="fw-semibold place-value-empty" id="mxRow">—</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 rounded small info-block">
+                                        <div class="text-muted">Секция</div>
+                                        <div class="fw-semibold place-value-empty" id="mxSection">—</div>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <div class="p-2 rounded small info-block">
+                                        <div class="text-muted">Статус МХ</div>
+                                        <div class="fw-semibold place-value-empty" id="mxStatus">—</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="place-card-empty-state text-center" id="placeCardEmptyHint">
+                                <i class="bi bi-upc-scan empty-state-icon d-block mb-2" aria-hidden="true"></i>
+                                <p class="place-card-empty-hint text-muted small mb-1 fw-semibold">Введите код МХ</p>
+                                <p class="place-card-empty-hint text-muted small mb-0">и нажмите «Получить» или отсканируйте штрихкод</p>
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="emptyStateScanNowBtn">
+                                    <i class="bi bi-qr-code me-1"></i>Сканировать сейчас
+                                </button>
+                            </div>
+                            <div class="alert alert-info py-2 mb-0 d-none" id="placeAlert" role="alert"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {# Режим «только скан» #}
+            <div class="scan-only-only mt-3 d-none" id="scanOnlyActions">
+                <p class="small text-muted mb-2 text-center">Свайп по карточке или кнопки</p>
+                <div class="d-flex gap-3 justify-content-center flex-wrap">
+                    <button type="button" class="btn btn-success scan-only-btn touch-target" id="scanOnlyOkBtn" data-scan-status="ok">
+                        <i class="bi bi-check-circle-fill me-2"></i>Совпадает
+                    </button>
+                    <button type="button" class="btn btn-danger scan-only-btn touch-target" id="scanOnlyErrorBtn" data-scan-status="error">
+                        <i class="bi bi-x-circle-fill me-2"></i>Ошибка
+                    </button>
+                </div>
+                <div class="text-center mt-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="newShiftBtnScanOnly">
+                        <i class="bi bi-clock-history me-1"></i>Новая смена
+                    </button>
+                </div>
+            </div>
         </div>
-        <div class="small text-muted mt-1" id="notificationList">Нет событий</div>
-    </div>
-</aside>
+    </section>
+
+    {# ── Фиксация результата ── #}
+    <section class="card work-block full-mode-only">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="section-title"><i class="bi bi-clipboard-check"></i>Фиксация результата</span>
+            <span class="badge rounded-pill" id="statusLabel"
+                  style="background:var(--bg-elevated);color:var(--text-muted)">Не выбран</span>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-2">Выберите статус проверки</p>
+
+            {# Кнопки статусов — новые плитки #}
+            <div class="status-btn-grid mb-3" id="statusButtons">
+                <button type="button" class="status-btn" data-status="ok">
+                    <i class="bi bi-check-circle" style="color:var(--success)"></i>
+                    <span>Совпадает</span>
+                </button>
+                <button type="button" class="status-btn" data-status="error">
+                    <i class="bi bi-exclamation-circle" style="color:var(--danger)"></i>
+                    <span>Ошибка</span>
+                </button>
+                <button type="button" class="status-btn" data-status="missing">
+                    <i class="bi bi-dash-circle" style="color:var(--warning)"></i>
+                    <span>Отсутствует</span>
+                </button>
+                <button type="button" class="status-btn" data-status="shelf_error">
+                    <i class="bi bi-grid-3x3-gap" style="color:var(--info)"></i>
+                    <span>Поломалось</span>
+                </button>
+            </div>
+
+            <div class="quick-error-wrap mb-3" id="quickErrorWrap">
+                <div class="small text-muted mb-2">Быстрый выбор ошибок</div>
+                <div class="quick-error-grid" id="quickErrorGrid">
+                    <button type="button" class="quick-error-btn" data-quick-error="no_rack">Нет стеллажа</button>
+                    <button type="button" class="quick-error-btn" data-quick-error="no_shelf">Нет полки</button>
+                    <button type="button" class="quick-error-btn" data-quick-error="no_container">Нет короба</button>
+                    <button type="button" class="quick-error-btn" data-quick-error="other">Другое</button>
+                </div>
+            </div>
+
+            <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
+                <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
+                <div class="quick-reason-chips mb-2" id="quickReasonChips"></div>
+                <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
+                    <option value="">Выберите причину…</option>
+                </select>
+                <div id="reasonDetailRow" class="d-none mb-2">
+                    <label class="form-label small text-muted" id="reasonDetailLabel"></label>
+                    <select class="form-select form-select-sm d-none" id="reasonDetailSelect"></select>
+                    <input type="text" class="form-control form-control-sm d-none" id="reasonDetailInput" placeholder="">
+                </div>
+                <div id="otherReasonBlock" class="d-none">
+                    <input type="text" class="form-control form-control-sm" id="otherReasonInput" placeholder="Опишите причину…">
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Комментарий</label>
+                <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Фото</label>
+                    <div class="photo-dropzone" id="photoDropzone">
+                        <input type="file" id="photoInput" accept="image/*" multiple hidden>
+                        <i class="bi bi-cloud-upload d-block mb-1"></i>
+                        <p class="small text-muted mb-2">Перетащите или выберите файл</p>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
+                        <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
+                    </div>
+                    <p class="form-text mt-1 mb-0" id="photoHint">Можно несколько фото</p>
+                </div>
+                <div class="col-md-6 d-flex flex-column justify-content-end">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="quickScanMode">
+                        <label class="form-check-label small" for="quickScanMode">Быстрый скан (авто-следующий МХ)</label>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="saveScanBtn">
+                        <span class="spinner-border spinner-border-sm me-2 d-none" id="saveSpinner" role="status"></span>
+                        Сохранить
+                    </button>
+                    <p class="form-text mt-2 mb-0">Карточка очистится после сохранения</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {# ── История сканов ── #}
+    <section class="card work-block full-mode-only card-history">
+        <div class="card-header">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span class="section-title"><i class="bi bi-clock-history"></i>История сканов</span>
+                <div class="history-toolbar">
+                    <input type="date" class="form-control form-control-sm history-date-input" id="historyFrom">
+                    <input type="date" class="form-control form-control-sm history-date-input" id="historyTo">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="historyReloadBtn">Показать</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="historyDownloadBadBtn">
+                        <span class="d-none d-sm-inline">Скачать ошибки</span>
+                        <span class="d-sm-none">Ошибки</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive table-wrap-history">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr><th>Время</th><th>МХ</th><th>Статус</th><th>Расх.</th><th>Фото</th></tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr class="history-empty-row">
+                            <td colspan="5" class="p-0 border-0">
+                                <div class="history-empty-state" id="historyEmptyState">
+                                    <i class="bi bi-calendar3 history-empty-icon"></i>
+                                    <p class="history-empty-title">Выберите период</p>
+                                    <p class="history-empty-text">Укажите даты и нажмите «Показать»</p>
+                                    <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="historyShowTodayBtn">
+                                        Показать за сегодня
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    {# ── Журнал событий ── #}
+    <aside class="card work-block full-mode-only card-journal" id="notificationPanel">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="section-title-inline"><i class="bi bi-journal-text me-1"></i>Журнал</span>
+                <button class="btn btn-link btn-sm p-0 text-muted" id="clearLogBtn">очистить</button>
+            </div>
+            <div class="small text-muted mt-1" id="notificationList">Нет событий</div>
+        </div>
+    </aside>
+
 </div>
 
-<button type="button" class="btn btn-primary rounded-circle position-fixed bottom-0 end-0 m-4 shadow full-mode-only" id="fabScanBtn"
-        style="width:56px;height:56px;z-index:1050" title="QR-сканер">
-    <i class="bi bi-qr-code-scan fs-4"></i>
+{# FAB QR #}
+<button type="button" class="btn position-fixed bottom-0 end-0 m-4 full-mode-only"
+        id="fabScanBtn" style="z-index:1050" title="QR-сканер" aria-label="Открыть QR-сканер">
+    <i class="bi bi-qr-code-scan"></i>
 </button>
 
-<div class="position-fixed top-0 end-0 p-3 toast-container-wrapper" id="toastContainerWrapper">
-    <div id="toastContainer" class="toast-container"></div>
+{# Тосты #}
+<div class="toast-container-wrapper" id="toastContainerWrapper">
+    <div id="toastContainer"></div>
 </div>
+{% endblock %}
 
-<div class="modal fade" id="newShiftConfirmModal" tabindex="-1" aria-labelledby="newShiftConfirmTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
+{% block modals %}
+{# Подтверждение новой смены #}
+<div class="modal fade" id="newShiftConfirmModal" tabindex="-1"
+     aria-labelledby="newShiftConfirmTitle" aria-hidden="true"
+     data-bs-backdrop="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="newShiftConfirmTitle"><i class="bi bi-clock-history me-2"></i>Новая смена</h5>
+                <h5 class="modal-title" id="newShiftConfirmTitle">
+                    <i class="bi bi-clock-history me-2"></i>Новая смена
+                </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
             <div class="modal-body">
-                <p class="mb-0">Начать новую смену? Счётчик сохранённых за сессию обнулится, отчёты будут считаться с этого момента.</p>
+                <p class="mb-0">Начать новую смену? Счётчик обнулится, отчёты будут считаться с этого момента.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                <button type="button" class="btn btn-primary" id="newShiftConfirmBtn"><i class="bi bi-check-lg me-1"></i>Начать новую смену</button>
+                <button type="button" class="btn btn-primary" id="newShiftConfirmBtn">
+                    <i class="bi bi-check-lg me-1"></i>Начать новую смену
+                </button>
             </div>
         </div>
     </div>
 </div>
 
-<div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalTitle" aria-hidden="true" data-bs-backdrop="true" data-bs-keyboard="true">
+{# QR-сканер #}
+<div class="modal fade" id="qrModal" tabindex="-1"
+     aria-labelledby="qrModalTitle" aria-hidden="true"
+     data-bs-backdrop="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header d-flex align-items-center justify-content-between">
                 <h5 class="modal-title" id="qrModalTitle">QR-код</h5>
                 <div class="d-flex align-items-center gap-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
-                    <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
                 </div>
             </div>
             <div class="modal-body qr-modal-body">
@@ -289,21 +373,24 @@
                 <div class="qr-reader-wrap">
                     <div id="qrReader" class="border rounded"></div>
                 </div>
-                <p class="text-center mt-2 mb-0"><span class="badge bg-secondary" id="qrStatus">Инициализация</span></p>
+                <p class="text-center mt-2 mb-0">
+                    <span class="badge" id="qrStatus"
+                          style="background:var(--bg-elevated);color:var(--text-muted)">Инициализация</span>
+                </p>
             </div>
             <div class="modal-footer d-flex justify-content-between">
                 <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="qrTorchBtn" title="Включить фонарик">
                     <i class="bi bi-flashlight" id="qrTorchIcon"></i>
                     <span id="qrTorchLabel">Фонарик</span>
                 </button>
-                <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Закрыть</button>
+                <button type="button" class="btn btn-outline-secondary ms-auto" data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
 
 {% block scripts %}
 {{ super() }}
 <script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
-{% endblock %}
 {% endblock %}

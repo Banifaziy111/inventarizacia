@@ -205,15 +205,11 @@ def process_csv_row(row: Dict) -> Optional[Dict]:
             'mx_code': mx_code,
             'floor': floor_from_csv or parsed['floor'],
             'row_num': row_num or parsed['row_num'],
-            'code': parsed['code'],
             'section': section or parsed['section'],
             'shelf': shelf or parsed['shelf'],
-            'number': None,  # Нет в CSV
             'cell': cell or parsed['cell'],
-            'number_2': None,  # Нет в CSV
             'storage_type': row.get('Короба МХ', '').strip() or None,
             'category': None,  # Нужно извлечь из других данных
-            'size_group': None,  # Нужно извлечь из других данных
             'dimensions': None,  # Нужно извлечь из других данных
             'wh_id': wh_id,
             # Название склада: приоритет «Блок» / «Склад» (например «Электросталь 6»), иначе «Этаж»
@@ -221,8 +217,6 @@ def process_csv_row(row: Dict) -> Optional[Dict]:
             'box_type': row.get('Короба МХ', '').strip() or None,
             'current_volume': safe_float(row.get('Текущий объем МХ')),
             'current_occupancy': row.get('Текущая заполненая вместимость МХ МХ ячейки', '').strip() or None,
-            'photo_fixation': row.get('Фото-фиксация (кейс превышен или открытое МХ последнии 30 дней)', '').strip() or None,
-            'location_stat_code': safe_float(row.get('Стат код локации')),
             'mx_status': (row.get('Статус МХ') or row.get('Статус') or '').strip() or None,
         }
         
@@ -293,38 +287,36 @@ def insert_batch(
         return 0
     insert_query = """
         INSERT INTO warehouse_places (
-            mx_id, mx_code, floor, row_num, code, section, shelf, number, cell, number_2,
-            storage_type, category, size_group, dimensions,
+            mx_id, mx_code, floor, row_num, section, shelf, cell,
+            storage_type, category, dimensions,
             wh_id, warehouse_name, box_type, current_volume, current_occupancy,
-            photo_fixation, location_stat_code, mx_status
+            mx_status
         ) VALUES %s
         ON CONFLICT (mx_id) DO UPDATE SET
             mx_code = EXCLUDED.mx_code,
             floor = EXCLUDED.floor,
             row_num = EXCLUDED.row_num,
-            code = EXCLUDED.code,
             section = EXCLUDED.section,
             shelf = EXCLUDED.shelf,
             cell = EXCLUDED.cell,
             storage_type = EXCLUDED.storage_type,
+            category = EXCLUDED.category,
+            dimensions = EXCLUDED.dimensions,
             wh_id = EXCLUDED.wh_id,
             warehouse_name = EXCLUDED.warehouse_name,
             box_type = EXCLUDED.box_type,
             current_volume = EXCLUDED.current_volume,
             current_occupancy = EXCLUDED.current_occupancy,
-            photo_fixation = EXCLUDED.photo_fixation,
-            location_stat_code = EXCLUDED.location_stat_code,
             mx_status = EXCLUDED.mx_status,
             updated_at = CURRENT_TIMESTAMP
     """
     values = [
         (
-            r['mx_id'], r['mx_code'], r['floor'], r['row_num'], r['code'],
-            r['section'], r['shelf'], r['number'], r['cell'], r['number_2'],
-            r['storage_type'], r['category'], r['size_group'], r['dimensions'],
+            r['mx_id'], r['mx_code'], r['floor'], r['row_num'],
+            r['section'], r['shelf'], r['cell'],
+            r['storage_type'], r['category'], r['dimensions'],
             r['wh_id'], r['warehouse_name'], r['box_type'], r['current_volume'],
-            r['current_occupancy'], r['photo_fixation'], r['location_stat_code'],
-            r.get('mx_status'),
+            r['current_occupancy'], r.get('mx_status'),
         )
         for r in records
     ]

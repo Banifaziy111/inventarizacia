@@ -1,5 +1,8 @@
 const ANIMATE_SELECTORS = [
     ".card",
+    ".work-block",
+    ".admin-kpi-card",
+    ".admin-widget",
     ".progress-card",
     ".hero-card",
     ".place-card",
@@ -12,6 +15,9 @@ let animationObserver = null;
 const PLACE_CACHE_KEY = "inventory-mx-cache";
 const PLACE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
 const PLACE_CACHE_MAX = 500;
+const SYNC_CURSOR_KEY = "inventory-sync-cursor";
+const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
+const SYNC_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 часов
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
 
 // Ограничение размера фото для отправки (Vercel лимит тела запроса 4.5 MB)
@@ -60,6 +66,37 @@ const PlaceCache = {
             localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(store));
         } catch (e) {
             console.warn("PlaceCache set error", e);
+        }
+    },
+    setMany(rows) {
+        try {
+            if (!Array.isArray(rows) || rows.length === 0) return;
+            const raw = localStorage.getItem(PLACE_CACHE_KEY);
+            const store = raw ? JSON.parse(raw) : { items: {}, order: [] };
+            store.items = store.items || {};
+            store.order = store.order || [];
+            const now = Date.now();
+            const pushKey = (k, data) => {
+                if (!k) return;
+                const key = String(k).trim().toUpperCase();
+                if (!key) return;
+                store.items[key] = { data, ts: now };
+                if (!store.order.includes(key)) store.order.push(key);
+            };
+            rows.forEach((row) => {
+                if (!row) return;
+                const numId = row.place_cod != null ? String(row.place_cod) : "";
+                const strCode = row.place_name ? String(row.place_name).trim().toUpperCase() : "";
+                pushKey(numId, row);
+                pushKey(strCode, row);
+            });
+            while (store.order.length > PLACE_CACHE_MAX) {
+                const old = store.order.shift();
+                if (old) delete store.items[old];
+            }
+            localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(store));
+        } catch (e) {
+            console.warn("PlaceCache setMany error", e);
         }
     },
 };
@@ -125,27 +162,47 @@ const OfflineQueue = {
     },
 };
 
+let _offlineSyncInFlight = null;
+
 async function syncOfflineQueue() {
-    const queue = OfflineQueue.getAll();
-    if (!queue.length || !navigator.onLine) return 0;
-    const remaining = [];
-    for (const item of queue) {
-        try {
-            const res = await fetch("/api/scan/complete", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify(item.body || (item.place_cod ? item : item.body) || {}),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || data.error) remaining.push(item);
-        } catch (_) {
-            remaining.push(item);
+    if (_offlineSyncInFlight) return _offlineSyncInFlight;
+    _offlineSyncInFlight = (async () => {
+        const queue = OfflineQueue.getAll();
+        if (!queue.length || !navigator.onLine) return 0;
+        const remaining = [];
+        for (const item of queue) {
+            try {
+                const res = await fetch("/api/scan/complete", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(item.body || (item.place_cod ? item : item.body) || {}),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || data.error) remaining.push(item);
+            } catch (_) {
+                remaining.push(item);
+            }
         }
+
+        // merge-safe: учитываем новые элементы, добавленные пока шёл sync
+        const latest = OfflineQueue.getAll();
+        const sentSet = new Set(queue.map((x) => JSON.stringify(x)));
+        const newItems = latest.filter((x) => !sentSet.has(JSON.stringify(x)));
+        const merged = [...remaining, ...newItems];
+
+        if (merged.length === 0) {
+            OfflineQueue.clear();
+        } else {
+            OfflineQueue.set(merged);
+        }
+        return queue.length - remaining.length;
+    })();
+    try {
+        return await _offlineSyncInFlight;
+    } finally {
+        _offlineSyncInFlight = null;
     }
-    OfflineQueue.set(remaining);
-    if (remaining.length === 0) OfflineQueue.clear();
-    return queue.length - remaining.length;
 }
 
 const API = {
@@ -286,22 +343,99 @@ function initThemeToggle() {
     const stored = localStorage.getItem("inventory-theme");
     applyTheme(stored || "light");
     const toggle = document.getElementById("themeToggle");
-    toggle?.addEventListener("click", () => {
+    toggle?.addEventListener("click", (event) => {
         const current = document.body.dataset.theme === "dark" ? "dark" : "light";
         const next = current === "dark" ? "light" : "dark";
+
+        // Точка анимации (куда кликнули)
+        const x = event?.clientX ?? window.innerWidth / 2;
+        const y = event?.clientY ?? 80;
+
+        // splash overlay — красивое наложение при смене переменных
+        const splashId = "themeSplash";
+        let splash = document.getElementById(splashId);
+        if (!splash) {
+            splash = document.createElement("div");
+            splash.id = splashId;
+            splash.className = "theme-splash";
+            document.body.appendChild(splash);
+        }
+        splash.style.setProperty("--splash-x", `${x}px`);
+        splash.style.setProperty("--splash-y", `${y}px`);
+        splash.classList.remove("theme-splash--run");
+        // force reflow so the animation restarts
+        // eslint-disable-next-line no-unused-expressions
+        splash.offsetHeight;
+        splash.classList.add("theme-splash--run");
+
         toggle.classList.add("theme-toggle--clicked", next === "dark" ? "theme-sunset" : "theme-sunrise");
         applyTheme(next);
         localStorage.setItem("inventory-theme", next);
+
         setTimeout(() => {
             toggle.classList.remove("theme-toggle--clicked", "theme-sunset", "theme-sunrise");
         }, 650);
     });
 }
 
+function initCommandPalette() {
+    const palette = document.getElementById("commandPalette");
+    if (!palette) return;
+    const backdrop = document.getElementById("commandPaletteBackdrop");
+    const cmdNewShift = document.getElementById("cmdNewShift");
+    const cmdSyncQueue = document.getElementById("cmdSyncQueue");
+    const cmdOpenReports = document.getElementById("cmdOpenReports");
+
+    const close = () => palette.classList.add("d-none");
+    const open = () => palette.classList.remove("d-none");
+
+    document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+            e.preventDefault();
+            if (palette.classList.contains("d-none")) open();
+            else close();
+        }
+        if (e.key === "Escape") close();
+    });
+    backdrop?.addEventListener("click", close);
+    palette.querySelectorAll("a.command-item").forEach((a) => a.addEventListener("click", close));
+    cmdNewShift?.addEventListener("click", () => {
+        document.getElementById("newShiftBtn")?.click();
+        document.getElementById("newShiftBtnScanOnly")?.click();
+        close();
+    });
+    cmdSyncQueue?.addEventListener("click", () => {
+        document.getElementById("offlineQueueSyncBtn")?.click();
+        close();
+    });
+    cmdOpenReports?.addEventListener("click", () => {
+        document.getElementById("exportBtn")?.click();
+        close();
+    });
+}
+
+function initTopbarClock() {
+    const el = document.getElementById("topbarClock");
+    if (!el) return;
+    const render = () => {
+        const now = new Date();
+        el.textContent = now.toLocaleTimeString("ru-RU", {
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    };
+    render();
+    setInterval(render, 1000);
+}
+
 function markAnimateTargets() {
     ANIMATE_SELECTORS.forEach((selector) => {
-        document.querySelectorAll(selector).forEach((element) => {
+        document.querySelectorAll(selector).forEach((element, idx) => {
             element.classList.add("animate-on-scroll");
+            if (!element.dataset.staggerIndex) {
+                element.style.setProperty("--stagger-index", String(idx % 12));
+                element.dataset.staggerIndex = "1";
+            }
         });
     });
 }
@@ -333,6 +467,28 @@ function initAnimations() {
     refreshAnimations();
 }
 
+function initMagneticButtons() {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const ids = ["saveScanBtn", "exportBtn", "offlineQueueSyncBtn"];
+    ids.forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.classList.add("magnetic-btn");
+        const intensity = 10;
+        btn.addEventListener("mousemove", (e) => {
+            const rect = btn.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const mx = ((x / rect.width) - 0.5) * intensity;
+            const my = ((y / rect.height) - 0.5) * intensity;
+            btn.style.transform = `translate(${mx.toFixed(1)}px, ${my.toFixed(1)}px)`;
+        });
+        btn.addEventListener("mouseleave", () => {
+            btn.style.transform = "";
+        });
+    });
+}
+
 function formatDate(value) {
     if (!value) return "—";
     const date = typeof value === "string" ? new Date(value) : value;
@@ -347,190 +503,177 @@ function formatDuration(seconds) {
 }
 
 function initLoginPage() {
-    const form = document.getElementById("loginForm");
-    if (!form) return;
+    const userForm      = document.getElementById("loginForm");
+    const adminForm     = document.getElementById("loginFormAdmin");
+    if (!userForm && !adminForm) return;
 
-    const badgeInput = document.getElementById("badgeInput");
-    const passwordInput = document.getElementById("passwordInput");
-    const passwordGroup = document.getElementById("passwordGroup");
-    const rememberCheckbox = document.getElementById("remember");
-    const alertBox = document.getElementById("loginAlert");
-    const connectionBadge = document.getElementById("connectionStatusBadge");
-    const deviceStatusInfo = document.getElementById("deviceStatusInfo");
-    const loginCard = document.getElementById("loginCard");
-    const loginLeftPanel = document.getElementById("loginLeftPanel");
-    const adminToggleLink = document.getElementById("adminToggleLink");
-    const titleEl = form.closest(".login-split-card")?.querySelector(".login-right-panel h2") || form.closest(".card")?.querySelector("h2");
-    const subtitleEl = form.closest(".login-split-card")?.querySelector(".login-subtitle") || form.closest(".card")?.querySelector("p.text-muted");
-    const togglePasswordBtn = document.getElementById("togglePassword");
+    // ── элементы ──
+    const flipCard       = document.getElementById("loginFlipCard");
+    const badgeInput     = document.getElementById("badgeInput");
+    const badgeAdminIn   = document.getElementById("badgeInputAdmin");
+    const passwordInput  = document.getElementById("passwordInput");
+    const rememberCheck  = document.getElementById("remember");
+    const alertBox       = document.getElementById("loginAlert");
+    const alertAdmin     = document.getElementById("loginAlertAdmin");
+    const connBadge      = document.getElementById("connectionStatusBadge");
+    const deviceInfo     = document.getElementById("deviceStatusInfo");
+    const togglePwdBtn   = document.getElementById("togglePassword");
+    const adminToggle    = document.getElementById("adminToggleLink");
+    const backLink       = document.getElementById("adminBackLink");
 
+    // подставить сохранённый бэйдж
     const storedBadge = localStorage.getItem("badge");
-    if (storedBadge && badgeInput) {
-        badgeInput.value = storedBadge;
+    if (storedBadge && badgeInput) badgeInput.value = storedBadge;
+
+    // ── стартовая анимация появления (на сцене, не на flipCard, чтобы не перебить transform flip) ──
+    const flipScene = flipCard?.closest(".login-flip-scene") || flipCard?.parentElement;
+    if (flipScene) {
+        flipScene.style.opacity = "0";
+        flipScene.style.transform = "translateY(24px)";
+        flipScene.style.transition = "opacity .5s ease, transform .5s ease";
+        requestAnimationFrame(() => {
+            flipScene.style.opacity = "1";
+            flipScene.style.transform = "translateY(0)";
+        });
     }
 
-    // стартовая анимация карточки
-    if (loginCard) {
-        loginCard.classList.add("login-card-enter");
-        setTimeout(() => loginCard.classList.remove("login-card-enter"), 600);
-    }
-
+    // ── утилита: flip ──
     let isAdminMode = false;
+    let flipLocked = false;
 
-    function switchToAdminMode() {
-        if (isAdminMode) return;
-        isAdminMode = true;
+    function doFlip(toAdmin) {
+        if (flipLocked || isAdminMode === toAdmin) return;
+        flipLocked = true;
+        isAdminMode = toAdmin;
 
-        if (titleEl) titleEl.textContent = "Вход администратора";
-        if (subtitleEl) subtitleEl.textContent = "Введите админ-пароль для доступа к панели управления";
+        flipCard?.classList.add("flipping");
 
-        if (badgeInput) {
-            badgeInput.value = "ADMIN";
-            badgeInput.readOnly = true;
-        }
-
-        passwordGroup?.classList.remove("d-none");
-        rememberCheckbox?.closest(".form-check")?.classList.add("d-none");
-
-        if (adminToggleLink) {
-            adminToggleLink.textContent = "← Назад к рабочему входу";
-        }
-        loginLeftPanel?.classList.add("flipped");
-
-        if (deviceStatusInfo) {
-            deviceStatusInfo.textContent = "Доступ к камере настраивается уже внутри админ-панели.";
-        }
-    }
-
-    function switchToUserMode() {
-        if (!isAdminMode) return;
-        isAdminMode = false;
-
-        if (titleEl) titleEl.textContent = "Вход по бэйджу";
-        if (subtitleEl) subtitleEl.textContent = "Введите номер пропуска сотрудника";
-
-        if (badgeInput) {
+        if (toAdmin) {
+            flipCard?.classList.add("is-flipped");
+            if (alertBox) { alertBox.classList.add("d-none"); alertBox.textContent = ""; }
+            // фокус после окончания анимации
+            setTimeout(() => { if (badgeAdminIn) { badgeAdminIn.value = ""; badgeAdminIn.focus(); } }, 680);
+        } else {
+            flipCard?.classList.remove("is-flipped");
             const stored = localStorage.getItem("badge");
-            badgeInput.readOnly = false;
-            badgeInput.value = stored || "";
+            if (badgeInput) { badgeInput.readOnly = false; badgeInput.value = stored || ""; }
+            if (alertAdmin) { alertAdmin.classList.add("d-none"); alertAdmin.textContent = ""; }
+            if (passwordInput) { passwordInput.value = ""; }
+            setTimeout(() => badgeInput?.focus(), 680);
         }
 
-        passwordGroup?.classList.add("d-none");
-        rememberCheckbox?.closest(".form-check")?.classList.remove("d-none");
-
-        if (adminToggleLink) {
-            adminToggleLink.textContent = "Вход для администратора";
-        }
-        loginLeftPanel?.classList.remove("flipped");
-
-        badgeInput?.focus();
-
-        if (deviceStatusInfo) {
-            const cameraOk = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-            deviceStatusInfo.textContent = cameraOk
-                ? "Камера устройства поддерживается этим браузером. Можно использовать сканер."
-                : "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
-        }
+        setTimeout(() => {
+            flipCard?.classList.remove("flipping");
+            flipLocked = false;
+        }, 750);
     }
 
-    function isCameraApiAvailableSimple() {
-        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-    }
+    adminToggle?.addEventListener("click", e => { e.preventDefault(); doFlip(true); });
+    backLink?.addEventListener("click",    e => { e.preventDefault(); doFlip(false); });
 
-    async function updateConnectionStatus() {
-        if (!connectionBadge) return;
-
-        // базовая проверка браузерного offline
-        if (!navigator.onLine) {
-            connectionBadge.textContent = "Оффлайн: нет сети";
-            connectionBadge.className = "badge rounded-pill text-bg-danger";
-            return;
-        }
-
-        connectionBadge.textContent = "Проверяем соединение…";
-        connectionBadge.className = "badge rounded-pill text-bg-secondary connection-status";
-        connectionBadge.classList.remove("connection-online", "connection-offline");
-
-        const { ok, data } = await API.get("/api/ping");
-        if (ok && data?.ok) {
-            connectionBadge.textContent = "Онлайн: связь с сервером";
-            connectionBadge.className = "badge rounded-pill text-bg-success connection-status connection-online";
-            connectionBadge.classList.add("badge-pulse-once");
-            setTimeout(() => connectionBadge.classList.remove("badge-pulse-once"), 1300);
-        } else {
-            connectionBadge.textContent = data?.error || "Проблемы соединения";
-            connectionBadge.className = "badge rounded-pill text-bg-warning connection-status connection-offline";
-        }
-    }
-
-    // первичная проверка и реакция на смену статуса сети
-    updateConnectionStatus();
-    window.addEventListener("online", updateConnectionStatus);
-    window.addEventListener("offline", updateConnectionStatus);
-    connectionBadge?.addEventListener("click", updateConnectionStatus);
-
-    // информация об устройстве (камера / браузер)
-    if (deviceStatusInfo) {
-        const cameraOk = isCameraApiAvailableSimple();
-        if (cameraOk) {
-            deviceStatusInfo.textContent = "Камера устройства поддерживается этим браузером. Можно использовать сканер.";
-        } else {
-            deviceStatusInfo.textContent = "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
-        }
-    }
-
-    togglePasswordBtn?.addEventListener("click", () => {
+    // ── показ/скрытие пароля ──
+    togglePwdBtn?.addEventListener("click", () => {
         if (!passwordInput) return;
         passwordInput.type = passwordInput.type === "password" ? "text" : "password";
-        const icon = togglePasswordBtn.querySelector("i");
+        const icon = togglePwdBtn.querySelector("i");
         if (icon) icon.className = passwordInput.type === "password" ? "bi bi-eye" : "bi bi-eye-slash";
     });
 
-    adminToggleLink?.addEventListener("click", (event) => {
-        event.preventDefault();
-        if (isAdminMode) {
-            switchToUserMode();
-        } else {
-            switchToAdminMode();
+    // ── проверка соединения ──
+    async function updateConnectionStatus() {
+        if (!connBadge) return;
+        if (!navigator.onLine) {
+            connBadge.textContent = "Оффлайн: нет сети";
+            connBadge.className = "badge rounded-pill text-bg-danger";
+            return;
         }
-    });
+        connBadge.textContent = "Проверяем соединение…";
+        connBadge.className = "badge rounded-pill text-bg-secondary connection-status";
+        connBadge.classList.remove("connection-online", "connection-offline");
+        const { ok, data } = await API.get("/api/ping");
+        if (ok && data?.ok) {
+            connBadge.textContent = "Онлайн: связь с сервером";
+            connBadge.className = "badge rounded-pill text-bg-success connection-status connection-online";
+            connBadge.classList.add("badge-pulse-once");
+            setTimeout(() => connBadge.classList.remove("badge-pulse-once"), 1300);
+        } else {
+            connBadge.textContent = data?.error || "Проблемы соединения";
+            connBadge.className = "badge rounded-pill text-bg-warning connection-status connection-offline";
+        }
+    }
+    updateConnectionStatus();
+    window.addEventListener("online",  updateConnectionStatus);
+    window.addEventListener("offline", updateConnectionStatus);
+    connBadge?.addEventListener("click", updateConnectionStatus);
 
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        form.classList.add("was-validated");
-        if (!form.checkValidity()) return;
+    // информация об устройстве
+    if (deviceInfo) {
+        const cameraOk = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        deviceInfo.textContent = cameraOk
+            ? "Камера устройства поддерживается. Можно использовать сканер."
+            : "Браузер не даёт доступ к камере. Используйте сканер штрихкодов или ручной ввод.";
+    }
 
-        hideAlert(alertBox);
-        const badge = badgeInput.value.trim();
-        const password = passwordInput.value.trim();
-
+    // ── общая функция отправки авторизации ──
+    async function submitAuth({ badge, password, alertEl, formEl, remember }) {
+        hideAlert(alertEl);
         const { ok, data } = await API.post("/api/auth", { badge, password });
         if (!ok || data.error) {
-            showAlert(alertBox, data.error || "Ошибка авторизации");
+            showAlert(alertEl, data.error || "Ошибка авторизации");
             return;
         }
-
         if (data.require_password) {
-            passwordGroup?.classList.remove("d-none");
-            showAlert(alertBox, data.message || "Введите пароль администратора", "info");
+            showAlert(alertEl, data.message || "Введите пароль", "info");
             return;
         }
-
-        if (rememberCheckbox?.checked) {
+        if (remember) {
             localStorage.setItem("badge", data.badge);
         } else {
             localStorage.removeItem("badge");
         }
-
         sessionStorage.setItem("badge", data.badge);
         sessionStorage.setItem("isAdmin", data.is_admin ? "1" : "0");
-        // При входе на рабочую страницу — начать новую смену (статистика с нуля)
         if (!data.is_admin && (data.redirect || "/work") === "/work") {
             sessionStorage.setItem("inventory_new_shift", "1");
         }
+        // анимация исчезновения перед редиректом (на сцене, не на flipCard)
+        const scene = flipCard?.closest(".login-flip-scene") || flipCard?.parentElement;
+        if (scene) {
+            scene.style.transition = "opacity .35s ease, transform .35s ease";
+            scene.style.opacity = "0";
+            scene.style.transform = "scale(.96) translateY(-8px)";
+        }
+        setTimeout(() => {
+            window.location.href = data.redirect || (data.is_admin ? "/admin/dashboard" : "/work");
+        }, 350);
+    }
 
-        const redirectTarget = data.redirect || (data.is_admin ? "/admin/dashboard" : "/work");
-        window.location.href = redirectTarget;
+    // ── форма обычного входа ──
+    userForm?.addEventListener("submit", async e => {
+        e.preventDefault();
+        userForm.classList.add("was-validated");
+        if (!userForm.checkValidity()) return;
+        await submitAuth({
+            badge:    badgeInput?.value.trim() || "",
+            password: "",
+            alertEl:  alertBox,
+            formEl:   userForm,
+            remember: rememberCheck?.checked,
+        });
+    });
+
+    // ── форма Admin-входа ──
+    adminForm?.addEventListener("submit", async e => {
+        e.preventDefault();
+        adminForm.classList.add("was-validated");
+        if (!adminForm.checkValidity()) return;
+        await submitAuth({
+            badge:    badgeAdminIn?.value.trim() || "ADMIN",
+            password: passwordInput?.value.trim() || "",
+            alertEl:  alertAdmin,
+            formEl:   adminForm,
+            remember: false,
+        });
     });
 }
 
@@ -613,8 +756,86 @@ function initWorkPage() {
     const offlineQueueCount = document.getElementById("offlineQueueCount");
     const offlineQueueSyncBtn = document.getElementById("offlineQueueSyncBtn");
     const offlineQueueHint = document.getElementById("offlineQueueHint");
+    const contextModeChip = document.getElementById("contextModeChip");
+    const contextBlockChip = document.getElementById("contextBlockChip");
+    const contextFreshChip = document.getElementById("contextFreshChip");
+    const lastScanAgoChip = document.getElementById("lastScanAgoChip");
+    const quickReasonChips = document.getElementById("quickReasonChips");
+    const quickErrorGrid = document.getElementById("quickErrorGrid");
+    const historyShowTodayBtn = document.getElementById("historyShowTodayBtn");
+    const emptyStateScanNowBtn = document.getElementById("emptyStateScanNowBtn");
+    const miniRecentScansList = document.getElementById("miniRecentScansList");
+    const miniRecentScansHint = document.getElementById("miniRecentScansHint");
 
     badgeLabel.textContent = badge;
+    try {
+        const lastAt = localStorage.getItem(SYNC_LAST_AT_KEY);
+        if (lastAt && lastSyncLabel) {
+            lastSyncLabel.textContent = `Синхронизация: ${formatDate(lastAt)}`;
+        }
+    } catch (_) {}
+
+    let placeSyncInProgress = false;
+
+    async function syncPlacesInChunks({ forceFull = false, silent = false } = {}) {
+        if (placeSyncInProgress) return;
+        if (!navigator.onLine) {
+            if (!silent) showToastMessage("Нет сети для синхронизации", "warning");
+            return;
+        }
+        placeSyncInProgress = true;
+        const globalProgressBar = document.getElementById("globalProgressBar");
+        if (globalProgressBar) globalProgressBar.classList.remove("d-none");
+        try {
+            let since = null;
+            if (!forceFull) {
+                const raw = localStorage.getItem(SYNC_CURSOR_KEY);
+                if (raw && /^\d+$/.test(raw)) since = Number(raw);
+            }
+            let limit = 700;
+            let totalLoaded = 0;
+            let pages = 0;
+            while (pages < 8) {
+                pages += 1;
+                const t0 = performance.now ? performance.now() : Date.now();
+                const params = new URLSearchParams();
+                params.set("limit", String(limit));
+                if (since != null) params.set("since_id", String(since));
+                const { ok, data } = await API.get(`/api/sync?${params.toString()}`);
+                const elapsed = (performance.now ? performance.now() : Date.now()) - t0;
+                if (!ok || data?.error) {
+                    if (!silent) showToastMessage(data?.error || "Ошибка синхронизации", "danger");
+                    break;
+                }
+                const rows = data?.data || [];
+                if (!rows.length) break;
+                // Пакетная запись вместо тысяч setItem подряд (сильно меньше лагов UI).
+                PlaceCache.setMany(rows);
+                totalLoaded += rows.length;
+                since = data?.next_since_id ?? since;
+                if (lastSyncLabel) {
+                    lastSyncLabel.textContent = `Синхронизация: ${totalLoaded} (пачка ${limit}, ${Math.round(elapsed)}мс)`;
+                }
+                // Адаптируем размер чанка под сеть/сервер:
+                // быстро -> увеличиваем, медленно -> уменьшаем.
+                if (elapsed < 600 && limit < 1200) limit = Math.min(1200, limit + 150);
+                else if (elapsed > 1200 && limit > 300) limit = Math.max(300, limit - 150);
+                if (!data?.has_more) break;
+            }
+            if (since != null) localStorage.setItem(SYNC_CURSOR_KEY, String(since));
+            localStorage.setItem(SYNC_LAST_AT_KEY, new Date().toISOString());
+            if (lastSyncLabel) {
+                lastSyncLabel.textContent = `Синхронизация: ${formatDate(new Date())}`;
+            }
+            if (!silent) {
+                if (totalLoaded > 0) showToastMessage(`Синхронизировано ${totalLoaded} МХ`, "success");
+                else showToastMessage("Синхронизация актуальна", "info");
+            }
+        } finally {
+            if (globalProgressBar) globalProgressBar.classList.add("d-none");
+            placeSyncInProgress = false;
+        }
+    }
 
     function updateOfflineQueueUI() {
         const queue = OfflineQueue.getAll();
@@ -661,6 +882,36 @@ function initWorkPage() {
         if (scanOnlyToggle) scanOnlyToggle.checked = on;
         const headerIndicator = document.getElementById("headerScanOnlyIndicator");
         if (headerIndicator) headerIndicator.classList.toggle("d-none", !on);
+        if (contextModeChip) {
+            contextModeChip.innerHTML = on
+                ? '<i class="bi bi-lightning-charge"></i> Режим: focus scan'
+                : '<i class="bi bi-bullseye"></i> Режим: стандарт';
+        }
+    }
+
+    function extractBlockLabel(value) {
+        const s = (value || "").toString().trim().toUpperCase();
+        const m = s.match(/^(Э\d+)/);
+        return m ? m[1] : "—";
+    }
+
+    function updateLastScanAgoChip() {
+        if (!lastScanAgoChip) return;
+        if (!state.lastSavedAt) {
+            lastScanAgoChip.innerHTML = '<i class="bi bi-clock-history"></i> Последний скан: —';
+            return;
+        }
+        const diffMin = Math.max(0, Math.round((Date.now() - state.lastSavedAt) / 60000));
+        const text = diffMin === 0 ? "только что" : `${diffMin} мин назад`;
+        lastScanAgoChip.innerHTML = `<i class="bi bi-clock-history"></i> Последний скан: ${text}`;
+    }
+
+    function focusPlaceInput(selectText = false) {
+        if (!placeInput) return;
+        placeInput.focus();
+        if (selectText && typeof placeInput.select === "function") {
+            placeInput.select();
+        }
     }
 
     function setTodayDates() {
@@ -715,6 +966,8 @@ function initWorkPage() {
         scanOnlyMode: (() => {
             try { return localStorage.getItem(SCAN_ONLY_STORAGE_KEY) === "1"; } catch (e) { return false; }
         })(),
+        lastSavedAt: null,
+        recentScans: [],
     };
     let qrScanner = null;
     let qrModalInstance = null;
@@ -755,7 +1008,7 @@ function initWorkPage() {
             { value: 'no_shelf', text: 'Нет полки', sub: [{ value: 'n_shelves', text: 'N полок' }, { value: 'shelf_size', text: 'размер полки' }] },
             { value: 'no_divider', text: 'Нет делителя', sub: [{ value: 'n_dividers', text: 'N делителей' }, { value: 'divider_size', text: 'размер делителя' }] },
             { value: 'no_box', text: 'Нет короба', sub: [{ value: 'n_boxes', text: 'N коробов' }, { value: 'box_size', text: 'размер короба' }] },
-            { value: 'no_container', text: 'Нет тары', detailPlaceholder: 'ID короба' },
+            { value: 'no_container', text: 'Нет короба', detailPlaceholder: 'ID короба' },
             { value: 'other', text: 'Другое' }
         ],
         shelf_error: [
@@ -796,6 +1049,13 @@ function initWorkPage() {
         hideReasonDetail();
         if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
         if (otherReasonInput) otherReasonInput.value = '';
+        if (quickReasonChips) {
+            quickReasonChips.innerHTML = list
+                .filter((x) => x.value !== "other")
+                .slice(0, 4)
+                .map((x) => `<button type="button" class="quick-reason-chip" data-reason-chip="${x.value}">${x.text}</button>`)
+                .join("");
+        }
     }
 
     function showReasonDetail(reasonOption) {
@@ -848,6 +1108,7 @@ function initWorkPage() {
                 hideReasonDetail();
                 if (otherReasonBlock) otherReasonBlock.classList.add('d-none');
                 if (otherReasonInput) otherReasonInput.value = '';
+                if (quickReasonChips) quickReasonChips.innerHTML = "";
             }
         }
     }
@@ -988,12 +1249,14 @@ function initWorkPage() {
     }
 
     function historyEmptyRow(iconClass, title, text, isError = false) {
+        const cta = !isError ? '<button type="button" class="btn btn-sm btn-outline-primary mt-2" data-history-today>Показать за сегодня</button>' : "";
         return `<tr class="history-empty-row">
             <td colspan="5" class="p-0 border-0">
                 <div class="history-empty-state ${isError ? "history-empty-state-error" : ""}">
                     <i class="bi ${iconClass} history-empty-icon"></i>
                     <p class="history-empty-title">${title}</p>
                     <p class="history-empty-text">${text}</p>
+                    ${cta}
                 </div>
             </td>
         </tr>`;
@@ -1026,6 +1289,8 @@ function initWorkPage() {
         }
 
         const history = data.history || [];
+        state.recentScans = history.slice(0, 3);
+        renderMiniRecentScans();
         if (!history.length) {
             historyTableBody.innerHTML = historyEmptyRow(
                 "bi-inbox",
@@ -1047,6 +1312,29 @@ function initWorkPage() {
             </tr>`
             )
             .join("");
+    }
+
+    function renderMiniRecentScans() {
+        if (!miniRecentScansList) return;
+        const items = Array.isArray(state.recentScans) ? state.recentScans.slice(0, 3) : [];
+        if (!items.length) {
+            miniRecentScansList.innerHTML = '<div class="text-muted small">Пока нет сканов</div>';
+            if (miniRecentScansHint) miniRecentScansHint.textContent = "—";
+            return;
+        }
+        if (miniRecentScansHint) miniRecentScansHint.textContent = `${items.length} шт`;
+        miniRecentScansList.innerHTML = items.map((item) => {
+            const statusRaw = String(item?.status || "—");
+            const status = statusRaw.toLowerCase();
+            const statusClass = status === "ok" ? "success" : status === "error" ? "danger" : "secondary";
+            const place = item?.place_name || item?.place_cod || "—";
+            const placeEscaped = String(place).replace(/"/g, "&quot;");
+            return `<button type="button" class="btn btn-sm btn-outline-secondary w-100 text-start mb-1" data-mini-place="${placeEscaped}">
+                <span class="fw-semibold me-2">${place}</span>
+                <span class="badge text-bg-${statusClass}">${statusRaw}</span>
+                <span class="small text-muted ms-2">${formatDate(item?.created_at)}</span>
+            </button>`;
+        }).join("");
     }
 
     function applyPlaceData(data, placeCod, fromCache = false) {
@@ -1081,6 +1369,21 @@ function initWorkPage() {
         setPlaceValue(mxSection, data.section != null ? String(data.section) : null);
         setPlaceValue(mxStatus, data.mx_status != null && data.mx_status !== "" ? String(data.mx_status) : null);
         placeUpdatedLabel.textContent = data.updated_at ? `Обновлено ${formatDate(data.updated_at)}` : "—";
+        if (contextBlockChip) {
+            const block = extractBlockLabel(data.place_name || data.place_cod || placeCod);
+            contextBlockChip.innerHTML = `<i class="bi bi-grid-1x2"></i> Блок: ${block}`;
+        }
+        if (contextFreshChip) {
+            const updated = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+            const days = updated ? Math.floor((Date.now() - updated) / 86400000) : null;
+            if (days == null || Number.isNaN(days)) {
+                contextFreshChip.innerHTML = '<i class="bi bi-database-check"></i> Данные: нет даты';
+            } else if (days <= 7) {
+                contextFreshChip.innerHTML = `<i class="bi bi-database-check"></i> Данные: свежие (${days} дн)`;
+            } else {
+                contextFreshChip.innerHTML = `<i class="bi bi-exclamation-circle"></i> Данные: устарели (${days} дн)`;
+            }
+        }
         state.lastMxCode = data.place_cod;
         state.currentPlace = { place_cod: data.place_cod, place_name: data.place_name, qty_db: data.qty_shk, mx_type: data.mx_type };
         if (repeatMxChip && repeatMxChipLabel) {
@@ -1149,6 +1452,8 @@ function initWorkPage() {
             if (el) { el.textContent = "—"; el.classList.add("place-value-empty"); }
         });
         placeUpdatedLabel.textContent = "—";
+        if (contextBlockChip) contextBlockChip.innerHTML = '<i class="bi bi-grid-1x2"></i> Блок: —';
+        if (contextFreshChip) contextFreshChip.innerHTML = '<i class="bi bi-database-check"></i> Данные: —';
         hideAlert(placeAlert);
         
         // Очищаем тип МХ в state
@@ -1372,6 +1677,7 @@ function initWorkPage() {
             status: state.currentStatus,
             discrepancy_reason: discrepancyReason || null,
             comment: commentInput?.value?.trim() || null,
+            force_duplicate: false,
             // Для обратной совместимости отправляем первое фото как photo,
             // а также полный массив photos для новой логики на сервере
             photo: state.photos[0] || state.photoData,
@@ -1382,7 +1688,9 @@ function initWorkPage() {
         saveScanBtn?.setAttribute("disabled", "disabled");
         const scanOnlyBtns = document.querySelectorAll(".scan-only-btn");
         scanOnlyBtns.forEach((b) => b?.setAttribute("disabled", "disabled"));
-        const { ok, data } = await API.post("/api/scan/complete", payload);
+        const firstTry = await API.post("/api/scan/complete", payload);
+        let ok = firstTry.ok;
+        let data = firstTry.data || {};
         saveSpinner?.classList.add("d-none");
         saveScanBtn?.removeAttribute("disabled");
         scanOnlyBtns.forEach((b) => b?.removeAttribute("disabled"));
@@ -1391,9 +1699,38 @@ function initWorkPage() {
             const errorMessage = data.error || "Не удалось сохранить результат";
             const isDuplicateInShift = data.code === "duplicate_in_shift" || (data.error && data.error.includes("уже отсканирован в текущей смене"));
             const isQueued = data.error && data.error.includes("очередь");
+            if (isDuplicateInShift) {
+                const confirmDuplicate = window.confirm(
+                    "Такая ячейка уже сканировалась в текущей смене.\nЭто задвойка?"
+                );
+                if (confirmDuplicate) {
+                    payload.force_duplicate = true;
+                    const secondTry = await API.post("/api/scan/complete", payload);
+                    if (!secondTry.ok || secondTry.data?.error || !secondTry.data?.success) {
+                        const secondError = secondTry.data?.error || "Не удалось сохранить задвойку";
+                        showAlert(placeAlert, secondError, "danger");
+                        logEvent(secondError, "danger");
+                        SoundFeedback.playError();
+                        return;
+                    }
+                    data = secondTry.data;
+                    ok = secondTry.ok;
+                } else {
+                    showAlert(placeAlert, "Скан не сохранен: задвойка отменена", "info");
+                    logEvent("Задвойка отменена пользователем", "info");
+                    focusPlaceInput(true);
+                    return;
+                }
+            }
+        }
+
+        if (!ok || data.error || !data.success) {
+            const errorMessage = data.error || "Не удалось сохранить результат";
+            const isQueued = data.error && data.error.includes("очередь");
+            const isDuplicateInShift = data.code === "duplicate_in_shift" || (data.error && data.error.includes("уже отсканирован в текущей смене"));
             showAlert(placeAlert, errorMessage, isDuplicateInShift || isQueued ? "info" : "danger");
-            logEvent(errorMessage, isDuplicateInShift || isQueued ? "info" : "danger");
-            if (!isQueued && !isDuplicateInShift) SoundFeedback.playError();
+            logEvent(errorMessage, isQueued ? "info" : "danger");
+            if (!isQueued) SoundFeedback.playError();
             updateOfflineQueueUI();
             if (isQueued) {
                 const nextMx = state.quickScanMode && state.suggestions.length
@@ -1406,7 +1743,7 @@ function initWorkPage() {
                     placeInput.classList.add("is-valid");
                     loadPlace(nextMx);
                 }
-                placeInput?.focus();
+                focusPlaceInput(true);
             }
             return;
         }
@@ -1417,6 +1754,12 @@ function initWorkPage() {
         if (result) {
             const placeKey = (result.place_name || result.place_cod || "").toString().trim().toUpperCase();
             if (placeKey) state.scannedPlaceCodes.add(placeKey);
+            state.recentScans = [result, ...state.recentScans.filter((x) => {
+                const a = (x?.place_cod ?? x?.place_name ?? "").toString();
+                const b = (result?.place_cod ?? result?.place_name ?? "").toString();
+                return a !== b;
+            })].slice(0, 3);
+            renderMiniRecentScans();
         }
         state.savedCount += 1;
         updateTodaySavedCount();
@@ -1424,6 +1767,8 @@ function initWorkPage() {
             state.photoUploads += 1;
         }
         showToastMessage("Результат сохранен");
+        state.lastSavedAt = Date.now();
+        updateLastScanAgoChip();
         if (saveScanBtn) {
             saveScanBtn.classList.add("save-success");
             setTimeout(() => saveScanBtn.classList.remove("save-success"), 600);
@@ -1445,7 +1790,7 @@ function initWorkPage() {
                 placeInput.classList.add("is-valid");
                 loadPlace(nextMx);
             }
-            placeInput?.focus();
+            focusPlaceInput(true);
         }, 850);
     }
 
@@ -1780,12 +2125,12 @@ function initWorkPage() {
     quickScanModeCheck?.addEventListener("change", () => {
         state.quickScanMode = !!quickScanModeCheck?.checked;
     });
-    refreshPlaceBtn?.addEventListener("click", () => {
+    refreshPlaceBtn?.addEventListener("click", (event) => {
         if (state.lastMxCode) {
             loadPlace(state.lastMxCode, { skipCache: true });
         } else {
-            showAlert(placeAlert, "Нет последнего МХ для обновления", "info");
-            logEvent("Нет последнего МХ для обновления", "warning");
+            // Если МХ ещё не открыт — используем кнопку как ручной запуск справочника (chunk sync).
+            syncPlacesInChunks({ forceFull: !!event?.shiftKey, silent: false });
         }
     });
     clearPlaceBtn?.addEventListener("click", clearPlaceCard);
@@ -1799,6 +2144,30 @@ function initWorkPage() {
     historyReloadBtn?.addEventListener("click", () => {
         loadHistory();
         logEvent("История сканов обновлена", "info");
+    });
+    historyShowTodayBtn?.addEventListener("click", () => {
+        const today = new Date().toISOString().slice(0, 10);
+        if (historyFromInput) historyFromInput.value = today;
+        if (historyToInput) historyToInput.value = today;
+        loadHistory();
+    });
+    historyTableBody?.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-history-today]");
+        if (!btn) return;
+        const today = new Date().toISOString().slice(0, 10);
+        if (historyFromInput) historyFromInput.value = today;
+        if (historyToInput) historyToInput.value = today;
+        loadHistory();
+    });
+    miniRecentScansList?.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-mini-place]");
+        if (!btn || !placeInput) return;
+        const place = btn.dataset.miniPlace || "";
+        if (!place) return;
+        placeInput.value = place;
+        placeInput.classList.add("is-valid");
+        loadPlace(place);
+        focusPlaceInput(true);
     });
     historyDownloadBadBtn?.addEventListener("click", () => {
         const params = new URLSearchParams();
@@ -1821,6 +2190,24 @@ function initWorkPage() {
         if (!target) return;
         setStatus(target.dataset.status);
     });
+    quickReasonChips?.addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-reason-chip]");
+        if (!chip || !discrepancyReasonSelect) return;
+        discrepancyReasonSelect.value = chip.dataset.reasonChip || "";
+        discrepancyReasonSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    quickErrorGrid?.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-quick-error]");
+        if (!btn || !discrepancyReasonSelect) return;
+        const reason = btn.dataset.quickError || "";
+        // Один клик: переводим в статус Ошибка и сразу выбираем типовую причину.
+        setStatus("error");
+        discrepancyReasonSelect.value = reason;
+        discrepancyReasonSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        const label = btn.textContent?.trim() || "ошибка";
+        showToastMessage(`Выбрано: ${label}`, "info");
+    });
+    emptyStateScanNowBtn?.addEventListener("click", () => startQrScanner());
     
     // При выборе причины показываем подпункт (выпадающий список или поле ввода) или «Другое»
     function getCurrentReasonOption() {
@@ -1871,8 +2258,41 @@ function initWorkPage() {
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
     document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape") return;
-        if (qrOverlayRoot && document.body.contains(qrOverlayRoot)) closeQrOverlay();
+        const key = (e.key || "").toLowerCase();
+        const target = e.target;
+        const isEditable = !!(
+            target &&
+            (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)
+        );
+
+        if (key === "escape") {
+            if (qrOverlayRoot && document.body.contains(qrOverlayRoot)) {
+                closeQrOverlay();
+                return;
+            }
+            clearPlaceCard();
+            focusPlaceInput();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && key === "enter") {
+            e.preventDefault();
+            if (!saveScanBtn?.disabled) saveScan();
+            return;
+        }
+
+        if (isEditable || e.ctrlKey || e.metaKey || e.altKey) return;
+
+        if (key === "1") {
+            e.preventDefault();
+            setStatus("ok");
+        } else if (key === "2") {
+            e.preventDefault();
+            setStatus("error");
+        } else if (key === "3") {
+            e.preventDefault();
+            setStatus("missing");
+        }
     });
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;
@@ -2016,7 +2436,32 @@ function initWorkPage() {
     updateOfflineQueueUI();
     loadHistory();
     refreshAnimations();
-    placeInput?.focus();
+    updateLastScanAgoChip();
+    renderMiniRecentScans();
+    setInterval(updateLastScanAgoChip, 30000);
+    focusPlaceInput();
+    // Автосинхронизация справочника: редко и только при хороших условиях.
+    const shouldAutoSyncCatalog = () => {
+        if (!navigator.onLine) return false;
+        if (document.visibilityState === "hidden") return false;
+        try {
+            const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+            if (conn?.saveData) return false;
+            const et = String(conn?.effectiveType || "").toLowerCase();
+            if (et && (et.includes("2g") || et.includes("slow-2g"))) return false;
+        } catch (_) {}
+        try {
+            const lastAtRaw = localStorage.getItem(SYNC_LAST_AT_KEY);
+            const lastTs = lastAtRaw ? Date.parse(lastAtRaw) : 0;
+            if (lastTs && Number.isFinite(lastTs) && (Date.now() - lastTs) < SYNC_AUTO_INTERVAL_MS) {
+                return false;
+            }
+        } catch (_) {}
+        return true;
+    };
+    if (shouldAutoSyncCatalog()) {
+        setTimeout(() => syncPlacesInChunks({ silent: true }), 1500);
+    }
 
     offlineQueueSyncBtn?.addEventListener("click", async () => {
         if (!navigator.onLine) {
@@ -2160,6 +2605,7 @@ function initAdminDashboard() {
     const adminPeriodSelect = document.getElementById("adminPeriodSelect");
     const exportEmployeesBtn = document.getElementById("exportEmployeesBtn");
     const ticketsCountBadge = document.getElementById("ticketsCountBadge");
+    const hourHeatmap = document.getElementById("hourHeatmap");
 
     let dailyChartInstance = null;
     let statusChartInstance = null;
@@ -2235,6 +2681,7 @@ function initAdminDashboard() {
         }
 
         renderHourlyChart(hourlyStats);
+        renderHourHeatmap(hourlyStats);
 
         renderList(
             discrepancyTypesList,
@@ -2245,6 +2692,25 @@ function initAdminDashboard() {
                     <span class="badge text-bg-danger">${item.count}</span>
                 </div>`
         );
+    }
+
+    function renderHourHeatmap(hourlyStats) {
+        if (!hourHeatmap) return;
+        const rows = Array.isArray(hourlyStats) ? hourlyStats : [];
+        const byHour = new Map();
+        rows.forEach((item) => {
+            if (!item?.hour) return;
+            const h = new Date(item.hour).getHours();
+            byHour.set(h, Number(item.count || 0));
+        });
+        const vals = Array.from({ length: 24 }, (_, h) => byHour.get(h) || 0);
+        const max = Math.max(...vals, 1);
+        hourHeatmap.innerHTML = vals.map((v, h) => {
+            const lvl = v === 0 ? 0 : v >= max * 0.75 ? 4 : v >= max * 0.5 ? 3 : v >= max * 0.25 ? 2 : 1;
+            return `<div class="hour-heat-cell hour-heat-lvl-${lvl}" title="${h.toString().padStart(2,"0")}:00 — ${v} сканов">
+                <span>${h.toString().padStart(2,"0")}</span><span class="v">${v}</span>
+            </div>`;
+        }).join("");
     }
 
     function renderHourlyChart(hourlyStats) {
@@ -2543,6 +3009,7 @@ function initAdminDashboard() {
     }
 
     async function loadActivityLog() {
+        if (!adminActivityList) return;
         const { ok, data } = await API.get("/api/admin/activity");
         if (!ok || data.error) {
             adminActivityList.innerHTML = `<div class="text-danger small">${data.error || "Ошибка загрузки журнала"}</div>`;
@@ -3076,8 +3543,11 @@ function initAdminDashboard() {
 
 document.addEventListener("DOMContentLoaded", () => {
     initThemeToggle();
+    initTopbarClock();
+    initCommandPalette();
     initMenuBadgeAndLogout();
     initAnimations();
+    initMagneticButtons();
     const page = document.body.dataset.page;
     const map = {
         index: initLoginPage,

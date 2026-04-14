@@ -7,6 +7,7 @@
 import asyncio
 import logging
 import os
+import random
 import sys
 
 from dotenv import load_dotenv
@@ -23,7 +24,9 @@ if sys.platform == "win32":
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from scraper.database import DatabaseConfig
+from core.db import safe_rollback, ensure_shift_start_table, ensure_warehouse_places_mx_status
+from core.places import get_place_handler
+from core.scans import complete_scan_handler
 
 # Настройка логирования
 logging.basicConfig(
@@ -46,18 +49,41 @@ CORS(app, resources={
     }
 })
 
-# Конфигурация БД (из переменных окружения в Docker/продакшене, иначе значения по умолчанию)
-DB_CONFIG = DatabaseConfig(
-    host=os.environ.get("DB_HOST", "31.207.77.167"),
-    port=int(os.environ.get("DB_PORT", "5432")),
-    database=os.environ.get("DB_NAME", "botdb"),
-    user=os.environ.get("DB_USER", "aperepechkin"),
-    password=os.environ.get("DB_PASSWORD", "password"),
-)
+# Конфигурация БД из переменных окружения
+class _DBConfig:
+    host = os.environ.get("DB_HOST", "31.207.77.167")
+    port = int(os.environ.get("DB_PORT", "5432"))
+    database = os.environ.get("DB_NAME", "botdb")
+    user = os.environ.get("DB_USER", "aperepechkin")
+    password = os.environ.get("DB_PASSWORD", "password")
+
+
+DB_CONFIG = _DBConfig()
 
 # Глобальное подключение к БД (синхронное). На Vercel не используется — соединение на каждый запрос.
 db_connection = None
 IS_VERCEL = os.environ.get("VERCEL") == "1"
+
+# Небольшой in-memory кэш для тяжёлых админских агрегатов (снижает нагрузку при частых refresh).
+ADMIN_CACHE_TTL_SECONDS = int(os.environ.get("ADMIN_CACHE_TTL_SECONDS", "45"))
+_admin_cache = {}
+
+# Простой in-memory rate-limit для дорогих endpoint'ов.
+# Формат: key -> (window_start_ts, count)
+_rate_limit_store = {}
+
+# Флаг однократной инициализации схемы БД
+_db_initialized = False
+
+
+@app.before_request
+def _init_db_once():
+    """Создаёт таблицы и индексы один раз на весь процесс (или один раз на каждый cold-start на Vercel)."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    _db_initialized = True
+    ensure_tasks_table()
 
 
 @app.route('/static/manifest.json')
@@ -109,6 +135,7 @@ def get_db():
     """Получить подключение к БД. На Vercel — одно соединение на запрос (хранится в g), после ответа закрывается."""
     if IS_VERCEL:
         if getattr(g, "db_conn", None) is None or g.db_conn.closed:
+            stmt_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
             connect_kw = {
                 "host": DB_CONFIG.host,
                 "port": DB_CONFIG.port,
@@ -117,25 +144,28 @@ def get_db():
                 "password": DB_CONFIG.password,
                 "cursor_factory": RealDictCursor,
                 "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
+                # Ограничиваем длительность тяжёлых запросов, чтобы не ловить 60s runtime timeout.
+                "options": f"-c statement_timeout={stmt_timeout_ms}",
             }
             sslmode = os.environ.get("DB_SSLMODE", "").strip().lower()
             if sslmode:
                 connect_kw["sslmode"] = sslmode
             g.db_conn = psycopg2.connect(**connect_kw)
-            ensure_tasks_table()
         return g.db_conn
     global db_connection
     if db_connection is None or db_connection.closed:
+        stmt_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
         db_connection = psycopg2.connect(
             host=DB_CONFIG.host,
             port=DB_CONFIG.port,
             database=DB_CONFIG.database,
             user=DB_CONFIG.user,
             password=DB_CONFIG.password,
-            cursor_factory=RealDictCursor
+            cursor_factory=RealDictCursor,
+            # Те же ограничения и для локального режима.
+            options=f"-c statement_timeout={stmt_timeout_ms}",
         )
         logger.info("Подключение к БД установлено")
-        ensure_tasks_table()
     return db_connection
 
 
@@ -149,45 +179,6 @@ def close_db_on_vercel(exception=None):
         except Exception as e:
             logger.warning("Ошибка при закрытии соединения: %s", e)
         g.db_conn = None
-
-
-def safe_rollback(conn):
-    """Безопасный rollback транзакции."""
-    if conn and not conn.closed:
-        try:
-            conn.rollback()
-        except Exception as e:
-            logger.error("Ошибка при rollback: %s", e)
-
-
-def ensure_shift_start_table(conn):
-    """Создаёт таблицу shift_start при первом обращении (граница смены для блокировки дубликатов МХ)."""
-    if not conn or conn.closed:
-        return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS shift_start (
-                    badge TEXT NOT NULL PRIMARY KEY,
-                    started_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
-                )
-            """)
-    except Exception as e:
-        logger.warning("Не удалось создать shift_start: %s", e)
-
-
-def ensure_warehouse_places_mx_status(conn):
-    """Добавляет колонку mx_status в warehouse_places при первом обращении (Статус МХ: Активно, есть/нет товаров)."""
-    if not conn or conn.closed:
-        return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                ALTER TABLE warehouse_places
-                ADD COLUMN IF NOT EXISTS mx_status VARCHAR(150)
-            """)
-    except Exception as e:
-        logger.warning("Не удалось добавить mx_status: %s", e)
 
 
 def ensure_tasks_table():
@@ -220,11 +211,17 @@ def ensure_tasks_table():
                     qty_shk_fact INTEGER,
                     status VARCHAR(50),
                     has_discrepancy BOOLEAN DEFAULT FALSE,
+                    discrepancy_reason TEXT,
+                    comment TEXT,
                     photo_data BYTEA,
                     photo_filename VARCHAR(255),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Миграция: колонки, которые используются в core/scans.py и в аналитике.
+            cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT")
+            cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS comment TEXT")
 
             # Таблица дополнительных фото к результатам инвентаризации
             cur.execute(
@@ -326,6 +323,8 @@ def ensure_tasks_table():
             """)
             # Миграция: добавить status в существующие таблицы (для старых БД)
             cur.execute("ALTER TABLE repaired_places ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'repaired'")
+            # Миграция: file_data в reports может быть NULL (файлы старше 30 дней обнуляются)
+            cur.execute("ALTER TABLE reports ALTER COLUMN file_data DROP NOT NULL")
             
             # Индексы
             cur.execute("""
@@ -347,6 +346,38 @@ def ensure_tasks_table():
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_inventory_results_discrepancy 
                 ON inventory_results(has_discrepancy)
+            """)
+            # Составной индекс: покрывает все запросы WHERE badge=? AND created_at>=?
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_badge_date
+                ON inventory_results(badge, created_at DESC)
+            """)
+            # Нужен для duplicate-check: WHERE badge=? AND place_cod=? AND created_at>=...
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_badge_place_created
+                ON inventory_results(badge, place_cod, created_at DESC)
+            """)
+            # Нужен для админ-выборок фото/последних сканов по месту.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_place_photo_filename
+                ON inventory_results(place_cod, photo_filename)
+            """)
+            # Частичные индексы для "горячих" фильтров админки/экспортов.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_not_ok_created
+                ON inventory_results(created_at DESC)
+                WHERE has_discrepancy = TRUE OR LOWER(COALESCE(status, '')) <> 'ok'
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_with_photo_created
+                ON inventory_results(created_at DESC)
+                WHERE photo_filename IS NOT NULL AND TRIM(photo_filename) <> ''
+            """)
+            # Ускоряет экспорт по блоку: фильтрация "не ok" + join/anti-join по place_cod.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_inventory_results_not_ok_place_created
+                ON inventory_results(place_cod, created_at DESC)
+                WHERE has_discrepancy = TRUE OR LOWER(COALESCE(status, '')) <> 'ok'
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_inventory_result_photos_result 
@@ -376,9 +407,30 @@ def ensure_tasks_table():
                 CREATE INDEX IF NOT EXISTS idx_repaired_places_wh 
                 ON repaired_places(wh_id)
             """)
-            
+            # Индексы под экспорт по wh_id и join с mx_code/mx_id.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_warehouse_places_wh_id_mx_id
+                ON warehouse_places(wh_id, mx_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_warehouse_places_wh_id_mx_code_norm
+                ON warehouse_places(wh_id, UPPER(TRIM(mx_code)))
+            """)
+
+            # Автоочистка старых отчётов: файлы > 30 дней удаляем из reports.file_data,
+            # но строку метаданных оставляем (чтобы история в админке не пропадала)
+            cur.execute("""
+                UPDATE reports
+                SET file_data = NULL
+                WHERE created_at < NOW() - INTERVAL '30 days'
+                  AND file_data IS NOT NULL
+            """)
+            cleaned = cur.rowcount
+            if cleaned:
+                logger.info("Очищено file_data у %d старых отчётов (> 30 дней)", cleaned)
+
             conn.commit()
-            logger.info("✅ Таблицы БД созданы")
+            logger.info("✅ Таблицы БД инициализированы")
     except Exception as e:
         safe_rollback(conn)
         logger.error("Ошибка создания таблиц: %s", e)
@@ -801,6 +853,10 @@ def get_user_history():
 @app.route('/api/user/history/export', methods=['GET'])
 def export_user_history():
     """Скачать все сканы сотрудника со статусом не OK (или с расхождением) за период."""
+    allowed, retry_after = _check_rate_limit("user_history_export", limit=20, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
+
     badge = request.args.get('badge', '').strip()
     date_from = request.args.get('from')
     date_to = request.args.get('to')
@@ -946,27 +1002,48 @@ def export_user_history():
         img_max_height = 60
         MAX_EMBEDDED_PHOTOS = 100
 
+        # Оптимизация: убираем N+1 запросы по фото (bulk-fetch по result_id).
+        candidate_result_ids = []
+        for row in rows:
+            if len(candidate_result_ids) >= MAX_EMBEDDED_PHOTOS:
+                break
+            if row.get("photo_filename") and row.get("result_id"):
+                candidate_result_ids.append(row["result_id"])
+
+        photo_by_result_id = {}
+        if candidate_result_ids:
+            with conn.cursor() as cur_ph:
+                cur_ph.execute(
+                    """
+                    SELECT result_id, photo_data
+                    FROM inventory_results
+                    WHERE result_id = ANY(%s) AND photo_data IS NOT NULL
+                    """,
+                    (candidate_result_ids,),
+                )
+                for ph_row in cur_ph.fetchall():
+                    photo_by_result_id[ph_row["result_id"]] = ph_row.get("photo_data")
+
+                missing_ids = [rid for rid in candidate_result_ids if rid not in photo_by_result_id]
+                if missing_ids:
+                    cur_ph.execute(
+                        """
+                        SELECT DISTINCT ON (result_id) result_id, photo_data
+                        FROM inventory_result_photos
+                        WHERE result_id = ANY(%s) AND photo_data IS NOT NULL
+                        ORDER BY result_id, photo_id ASC
+                        """,
+                        (missing_ids,),
+                    )
+                    for ph_row in cur_ph.fetchall():
+                        photo_by_result_id[ph_row["result_id"]] = ph_row.get("photo_data")
+
         for excel_row_idx, row in enumerate(rows, start=2):
             created = row["created_at"]
             has_photo = bool(row.get("photo_filename"))
             photo_data = None
             if has_photo and row.get("result_id") and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
-                with conn.cursor() as cur_ph:
-                    cur_ph.execute(
-                        "SELECT photo_data FROM inventory_results WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
-                        (row["result_id"],),
-                    )
-                    ph_row = cur_ph.fetchone()
-                    if ph_row:
-                        photo_data = ph_row.get("photo_data")
-                    if not photo_data:
-                        cur_ph.execute(
-                            "SELECT photo_data FROM inventory_result_photos WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
-                            (row["result_id"],),
-                        )
-                        ph_row = cur_ph.fetchone()
-                        if ph_row:
-                            photo_data = ph_row.get("photo_data")
+                photo_data = photo_by_result_id.get(row["result_id"])
 
             photo_cell_value = "есть" if has_photo else ""
             if has_photo and photo_data and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
@@ -1034,6 +1111,16 @@ def export_user_history():
     except Exception as e:
         logger.exception("Ошибка экспорта истории сканов пользователя")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/export', methods=['GET'])
+def export_user_history_legacy():
+    """Legacy alias: поддержка старых ссылок /export?..."""
+    qs = request.query_string.decode("utf-8") if request.query_string else ""
+    target = "/api/user/history/export"
+    if qs:
+        target = f"{target}?{qs}"
+    return redirect(target, code=302)
 
 
 @app.route('/api/user/session/start', methods=['POST'])
@@ -1184,367 +1271,13 @@ def admin_logout():
 @app.route('/api/place/<place_cod>', methods=['GET'])
 def get_place(place_cod):
     """Получение данных о месте по place_cod (числовой ID или строковый mx_code)."""
-    # Определяем тип идентификатора: числовой ID или строковый код МХ
-    try:
-        place_cod_int = int(place_cod)
-        search_by_id = True
-    except ValueError:
-        # Если не число, значит это mx_code (например, "Э6.01.01.01" или "Э6.04.20.285.06.03")
-        search_by_id = False
-        place_cod_str = place_cod.strip().upper()
-        # Кириллица А-Я (U+0410–U+042F), Ё (U+0401), латиница, цифры, точка, дефис
-        import re
-        if not re.match(r'^[\u0410-\u042F\u0401A-Z0-9.\-]+$', place_cod_str):
-            return jsonify({'error': 'Некорректный формат кода МХ'}), 400
-
-    try:
-        conn = get_db()
-        ensure_warehouse_places_mx_status(conn)
-        with conn.cursor() as cur:
-            if search_by_id:
-                # Поиск по числовому mx_id
-                cur.execute(
-                    """
-                    SELECT 
-                        wh_id,
-                        mx_id as place_cod, 
-                        mx_code as place_name, 
-                        0 as qty_shk,
-                        storage_type,
-                        box_type,
-                        dimensions,
-                        category,
-                        floor,
-                        row_num,
-                        section,
-                        shelf,
-                        cell,
-                        current_volume,
-                        current_occupancy,
-                        mx_status,
-                        updated_at
-                    FROM warehouse_places
-                    WHERE mx_id = %s
-                    """,
-                    (place_cod_int,),
-                )
-                row = cur.fetchone()
-            else:
-                # Поиск по строковому mx_code (точное совпадение с TRIM, затем без учёта пробелов)
-                cur.execute(
-                    """
-                    SELECT 
-                        wh_id,
-                        mx_id as place_cod, 
-                        mx_code as place_name, 
-                        0 as qty_shk,
-                        storage_type,
-                        box_type,
-                        dimensions,
-                        category,
-                        floor,
-                        row_num,
-                        section,
-                        shelf,
-                        cell,
-                        current_volume,
-                        current_occupancy,
-                        mx_status,
-                        updated_at
-                    FROM warehouse_places
-                    WHERE UPPER(TRIM(mx_code)) = UPPER(TRIM(%s))
-                    """,
-                    (place_cod_str,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    # Запасной вариант: поиск по совпадению без лишних пробелов внутри
-                    cur.execute(
-                        """
-                        SELECT 
-                            wh_id,
-                            mx_id as place_cod, 
-                            mx_code as place_name, 
-                            0 as qty_shk,
-                            storage_type,
-                            box_type,
-                            dimensions,
-                            category,
-                            floor,
-                            row_num,
-                            section,
-                            shelf,
-                            cell,
-                            current_volume,
-                            current_occupancy,
-                            mx_status,
-                            updated_at
-                        FROM warehouse_places
-                        WHERE REPLACE(UPPER(mx_code), ' ', '') = REPLACE(UPPER(TRIM(%s)), ' ', '')
-                        LIMIT 1
-                        """,
-                        (place_cod_str,),
-                    )
-                    row = cur.fetchone()
-
-            if not row:
-                return jsonify({'error': 'Место не найдено'}), 404
-
-            # Определяем тип МХ — только Полка или Короб (без Микс)
-            def _resolve_mx_type(storage_type, box_type, dimensions, category=None):
-                for val in (storage_type, box_type, category):
-                    if not val:
-                        continue
-                    s = str(val).lower()
-                    if 'короб' in s or 'box' in s:
-                        return "Короб"
-                    if 'полка' in s or 'shelf' in s or 'стеллаж' in s:
-                        return "Полка"
-                    # "Микс" не выводим — определяем по габаритам ниже
-                if dimensions:
-                    try:
-                        parts = str(dimensions).replace('х', 'x').replace('Х', 'x').split('x')
-                        nums = [int(p.strip()) for p in parts if p.strip().isdigit()]
-                        if nums:
-                            max_d = max(nums)
-                            if max_d > 900:
-                                return "Полка"
-                            return "Короб"  # до 900 мм — короб
-                    except (ValueError, TypeError):
-                        pass
-                # При неизвестном/микс без габаритов — по умолчанию короб
-                if storage_type or box_type or category:
-                    return "Короб"
-                return None
-
-            mx_type = _resolve_mx_type(
-                row.get('storage_type'), row.get('box_type'), row.get('dimensions'), row.get('category')
-            ) or "—"
-
-            # Статус админа (В работе / Исправлено), если задан по wh_id
-            admin_status = None
-            wh_id = row.get('wh_id')
-            if wh_id is not None:
-                cur.execute(
-                    "SELECT status FROM repaired_places WHERE wh_id = %s AND place_cod = %s",
-                    (wh_id, row['place_cod']),
-                )
-                status_row = cur.fetchone()
-                if status_row and status_row.get('status'):
-                    admin_status = status_row['status']  # 'in_work' | 'repaired'
-
-            return jsonify(
-                {
-                    'place_cod': row['place_cod'],
-                    'place_name': row['place_name'],
-                    'qty_shk': row['qty_shk'],
-                    'mx_type': mx_type,
-                    'storage_type': row['storage_type'],
-                    'box_type': row['box_type'],
-                    'dimensions': row['dimensions'],
-                    'category': row['category'] or 'Не указана',
-                    'floor': row['floor'],
-                    'row_num': row['row_num'],
-                    'section': row['section'],
-                    'shelf': row['shelf'],
-                    'cell': row['cell'],
-                    'current_volume': float(row['current_volume']) if row['current_volume'] else None,
-                    'current_occupancy': row['current_occupancy'],
-                    'mx_status': row.get('mx_status'),
-                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-                    'admin_status': admin_status,
-                }
-            )
-
-    except Exception as e:
-        logger.exception("Ошибка при получении данных о месте")
-        return jsonify({'error': str(e)}), 500
+    return get_place_handler(place_cod, get_db)
 
 
 @app.route('/api/scan/complete', methods=['POST'])
 def complete_scan():
     """Фиксация результата сканирования сотрудником."""
-    data = request.get_json() or {}
-    badge = data.get('badge')
-    place_cod = data.get('place_cod')
-    fact_qty = data.get('fact_qty')
-    status = data.get('status')
-    comment = data.get('comment', '')
-    discrepancy_reason = data.get('discrepancy_reason', '')
-    # Поддержка нескольких фото: новое поле photos (список),
-    # а поле photo оставляем для обратной совместимости (первое фото)
-    photos = data.get('photos') or []
-    photo_data = None
-    photo_filename = None
-
-    if not badge or not place_cod or not status:
-        return jsonify({'error': 'Недостаточно данных'}), 400
-
-    try:
-        place_cod_int = int(place_cod)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Некорректный place_cod'}), 400
-
-    # Декодируем одно или несколько фото
-    decoded_photos = []
-    import base64
-
-    def _decode_photo(photo_str: str, index: int = 0):
-        nonlocal photo_data, photo_filename
-        if not photo_str:
-            return
-        try:
-            if ',' in photo_str:
-                header, encoded = photo_str.split(',', 1)
-            else:
-                header = ''
-                encoded = photo_str
-            raw = base64.b64decode(encoded)
-            # Определяем расширение
-            ext = "jpg"
-            if 'png' in header:
-                ext = "png"
-            fname = f"{place_cod}_{index + 1}.{ext}"
-            decoded_photos.append((raw, fname))
-        except Exception as exc:
-            logger.error("Ошибка декодирования фото #%s: %s", index + 1, exc)
-
-    # Если пришёл массив photos — используем его, иначе старое поле photo
-    if isinstance(photos, list) and photos:
-        for idx, p in enumerate(photos):
-            _decode_photo(p, idx)
-    elif data.get('photo'):
-        _decode_photo(data.get('photo'), 0)
-
-    if decoded_photos:
-        # Первое фото сохраняем также в inventory_results для обратной совместимости
-        photo_data, photo_filename = decoded_photos[0]
-
-    try:
-        conn = get_db()
-        place_row = None
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT mx_code as place_name, 0 as qty_shk
-                FROM warehouse_places
-                WHERE mx_id = %s
-            """, (place_cod_int,))
-            place_row = cur.fetchone()
-
-            has_discrepancy = status != 'ok'
-            qty_shk_db = place_row['qty_shk'] if place_row else None
-            qty_fact_int = None
-            if fact_qty is not None:
-                try:
-                    qty_fact_int = int(fact_qty)
-                except (TypeError, ValueError):
-                    qty_fact_int = None
-
-            if qty_shk_db is not None and qty_fact_int is not None:
-                try:
-                    has_discrepancy = has_discrepancy or int(qty_shk_db) != qty_fact_int
-                except ValueError:
-                    pass
-
-            # Дубликат в рамках одной смены: один и тот же МХ этим сотрудником уже сканировался после границы смены
-            ensure_shift_start_table(conn)
-            # При первом визите: граница смены = начало уже сохранённых сканов этого бэйджа (или NOW()), чтобы дубликаты блокировались
-            cur.execute("""
-                INSERT INTO shift_start (badge, started_at)
-                SELECT %s, COALESCE(
-                    (SELECT MIN(created_at) FROM inventory_results WHERE badge = %s),
-                    NOW()
-                )
-                ON CONFLICT (badge) DO NOTHING
-            """, (badge, badge))
-            cur.execute("""
-                SELECT 1 FROM inventory_results ir
-                WHERE ir.badge = %s AND ir.place_cod = %s
-                  AND ir.created_at >= (SELECT started_at FROM shift_start WHERE shift_start.badge = %s)
-                LIMIT 1
-            """, (badge, place_cod_int, badge))
-            if cur.fetchone():
-                return jsonify({
-                    'error': 'Этот МХ уже отсканирован в текущей смене. Нажмите «Новая смена», чтобы сбросить границу смены и сканировать повторно.',
-                    'code': 'duplicate_in_shift'
-                }), 409
-
-            cur.execute(
-                """
-                INSERT INTO inventory_results
-                (badge, place_cod, place_name, qty_shk_db, qty_shk_fact, status, has_discrepancy, 
-                 photo_data, photo_filename, discrepancy_reason, comment)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING result_id, created_at
-                """,
-                (
-                    badge,
-                    place_cod_int,
-                    place_row['place_name'] if place_row else None,
-                    qty_shk_db,
-                    qty_fact_int,
-                    status,
-                    has_discrepancy,
-                    psycopg2.Binary(photo_data) if photo_data else None,
-                    photo_filename,
-                    discrepancy_reason if discrepancy_reason else None,
-                    comment if comment else None,
-                ),
-            )
-            inserted = cur.fetchone()
-
-            # Сохраняем все фото в отдельной таблице, если они есть
-            if decoded_photos:
-                for raw, fname in decoded_photos:
-                    cur.execute(
-                        """
-                        INSERT INTO inventory_result_photos
-                        (result_id, badge, place_cod, photo_data, photo_filename)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (
-                            inserted["result_id"],
-                            badge,
-                            place_cod_int,
-                            psycopg2.Binary(raw),
-                            fname,
-                        ),
-                    )
-
-            conn.commit()
-
-        logger.info("Скан сохранен: badge=%s place=%s status=%s", badge, place_cod, status)
-        return jsonify({
-            'success': True,
-            'result': {
-                'id': inserted['result_id'],
-                'place_cod': place_cod_int,
-                'place_name': place_row['place_name'] if place_row else None,
-                'qty_db': qty_shk_db,
-                'qty_fact': qty_fact_int,
-                'status': status,
-                'has_discrepancy': has_discrepancy,
-                'has_photo': photo_data is not None,
-                'comment': comment,
-                'created_at': inserted['created_at'].isoformat() if inserted and inserted['created_at'] else None
-            }
-        })
-    except psycopg2.Error as e:
-        if conn and not conn.closed:
-            try:
-                conn.rollback()
-            except:
-                pass
-        logger.exception("Ошибка БД при сохранении скана")
-        return jsonify({'error': f'Ошибка базы данных: {str(e)}'}), 500
-    except Exception as e:
-        if conn and not conn.closed:
-            try:
-                conn.rollback()
-            except:
-                pass
-        logger.exception("Ошибка при сохранении скана")
-        return jsonify({'error': str(e)}), 500
+    return complete_scan_handler(get_db)
 
 
 @app.route('/api/export', methods=['POST'])
@@ -1766,30 +1499,69 @@ def get_new_task():
         
         conn = get_db()
         max_attempts = 10  # Максимум попыток найти свободную зону
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT MIN(mx_id) AS min_id, MAX(mx_id) AS max_id
+                FROM warehouse_places
+                WHERE mx_code IS NOT NULL AND mx_code != ''
+                """
+            )
+            id_range = cur.fetchone() or {}
+            min_id = id_range.get("min_id")
+            max_id = id_range.get("max_id")
+        if min_id is None or max_id is None:
+            return jsonify({
+                'success': False,
+                'error': 'В справочнике нет доступных МХ.'
+            }), 404
         
         for attempt in range(max_attempts):
             with conn.cursor() as cur:
-                # Ищем случайную зону, которая не занята
-                cur.execute("""
-                    WITH random_place AS (
+                # Быстрый выбор случайной опорной точки через диапазон mx_id (без OFFSET и RANDOM sort).
+                random_id = random.randint(int(min_id), int(max_id))
+                cur.execute(
+                    """
+                    SELECT mx_code
+                    FROM warehouse_places
+                    WHERE mx_code IS NOT NULL AND mx_code != '' AND mx_id >= %s
+                    ORDER BY mx_id
+                    LIMIT 1
+                    """,
+                    (random_id,),
+                )
+                seed_row = cur.fetchone()
+                if not seed_row:
+                    # fallback на начало диапазона
+                    cur.execute(
+                        """
                         SELECT mx_code
                         FROM warehouse_places
                         WHERE mx_code IS NOT NULL AND mx_code != ''
-                        ORDER BY RANDOM()
+                        ORDER BY mx_id
                         LIMIT 1
+                        """
                     )
-                    SELECT 
-                        w.mx_id as place_cod,
-                        w.mx_code as place_name,
-                        0 as qty_shk
-                    FROM warehouse_places w, random_place r
-                    WHERE w.mx_code LIKE SUBSTRING(r.mx_code, 1, 9) || '%%'
-                        AND w.mx_code IS NOT NULL
-                    ORDER BY w.mx_code
-                    LIMIT %s
-                """, (zone_size,))
-                
-                rows = cur.fetchall()
+                    seed_row = cur.fetchone()
+
+                if not seed_row or not seed_row.get("mx_code"):
+                    rows = []
+                else:
+                    cur.execute(
+                        """
+                        SELECT
+                            w.mx_id as place_cod,
+                            w.mx_code as place_name,
+                            0 as qty_shk
+                        FROM warehouse_places w
+                        WHERE w.mx_code LIKE SUBSTRING(%s, 1, 9) || '%%'
+                          AND w.mx_code IS NOT NULL
+                        ORDER BY w.mx_code
+                        LIMIT %s
+                        """,
+                        (seed_row["mx_code"], zone_size),
+                    )
+                    rows = cur.fetchall()
             
             if not rows:
                 continue
@@ -2172,15 +1944,65 @@ def get_task_suggestions():
 
 @app.route('/api/sync', methods=['GET'])
 def sync_data():
-    """Синхронизация всех данных для offline работы."""
+    """Синхронизация данных для offline работы (поддерживает инкрементальную загрузку)."""
+    allowed, retry_after = _check_rate_limit("sync_data", limit=60, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
+
     try:
+        since_id_raw = request.args.get("since_id")
+        limit_raw = request.args.get("limit")
+        try:
+            since_id = int(since_id_raw) if since_id_raw not in (None, "") else None
+        except ValueError:
+            return jsonify({"error": "since_id должен быть числом"}), 400
+        try:
+            limit = int(limit_raw) if limit_raw not in (None, "") else None
+        except ValueError:
+            return jsonify({"error": "limit должен быть числом"}), 400
+        if limit is not None:
+            limit = max(1, min(limit, 20000))
+
         conn = get_db()
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
-                FROM warehouse_places
-                ORDER BY mx_id
-            """)
+            if since_id is not None and limit is not None:
+                cur.execute(
+                    """
+                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                    FROM warehouse_places
+                    WHERE mx_id > %s
+                    ORDER BY mx_id
+                    LIMIT %s
+                    """,
+                    (since_id, limit),
+                )
+            elif since_id is not None:
+                cur.execute(
+                    """
+                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                    FROM warehouse_places
+                    WHERE mx_id > %s
+                    ORDER BY mx_id
+                    """,
+                    (since_id,),
+                )
+            elif limit is not None:
+                cur.execute(
+                    """
+                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                    FROM warehouse_places
+                    ORDER BY mx_id
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            else:
+                # Backward-compatible path: full dataset when params are absent.
+                cur.execute("""
+                    SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                    FROM warehouse_places
+                    ORDER BY mx_id
+                """)
             rows = cur.fetchall()
         
         data = [dict(row) for row in rows]
@@ -2191,6 +2013,8 @@ def sync_data():
             'success': True,
             'count': len(data),
             'data': data,
+            'next_since_id': data[-1]['place_cod'] if data else since_id,
+            'has_more': bool(limit and len(data) >= limit),
             'timestamp': datetime.now().isoformat()
         })
     
@@ -2212,12 +2036,51 @@ def _admin_period_dates():
     return date_from, date_to
 
 
+def _admin_cache_get(key: str):
+    entry = _admin_cache.get(key)
+    if not entry:
+        return None
+    if (datetime.now() - entry["ts"]).total_seconds() > ADMIN_CACHE_TTL_SECONDS:
+        _admin_cache.pop(key, None)
+        return None
+    return entry.get("value")
+
+
+def _admin_cache_set(key: str, value):
+    _admin_cache[key] = {"ts": datetime.now(), "value": value}
+
+
+def _check_rate_limit(bucket: str, limit: int, window_seconds: int):
+    """
+    Возвращает (allowed: bool, retry_after: int).
+    Очень лёгкий in-memory limit (на процесс), без внешних зависимостей.
+    """
+    now = datetime.now().timestamp()
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    key = f"{bucket}:{ip}"
+    window_start, count = _rate_limit_store.get(key, (now, 0))
+    if now - window_start >= window_seconds:
+        window_start, count = now, 0
+    count += 1
+    _rate_limit_store[key] = (window_start, count)
+    if count > limit:
+        retry_after = max(1, int(window_seconds - (now - window_start)))
+        return False, retry_after
+    return True, 0
+
+
 @app.route('/api/admin/analytics', methods=['GET'])
 def get_admin_analytics():
     """Получить данные для графиков."""
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
+
+    period = request.args.get('period', '7d')
+    cache_key = f"admin:analytics:{period}"
+    cached = _admin_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
 
     date_from, date_to = _admin_period_dates()
     try:
@@ -2288,12 +2151,14 @@ def get_admin_analytics():
                     'error_rate': round((row['error_count'] / row['scan_count']) * 100, 1)
                 })
         
-        return jsonify({
+        payload = {
             'success': True,
             'daily_stats': daily_stats,
             'accuracy_stats': accuracy_stats,
             'problem_zones': problem_zones
-        })
+        }
+        _admin_cache_set(cache_key, payload)
+        return jsonify(payload)
     
     except Exception as e:
         logger.exception("Ошибка при получении аналитики")
@@ -2306,6 +2171,12 @@ def get_admin_stats():
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
+
+    period = request.args.get('period', '7d')
+    cache_key = f"admin:stats:{period}"
+    cached = _admin_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
 
     date_from, date_to = _admin_period_dates()
     try:
@@ -2394,14 +2265,14 @@ def get_admin_stats():
                     'count': row['count'],
                 })
             
-            # Динамика по часам (последние 24 часа)
+            # Динамика по часам (последние 24 часа, в МСК для一致ности с UI админки)
             cur.execute("""
                 SELECT 
-                    DATE_TRUNC('hour', created_at) as hour,
+                    DATE_TRUNC('hour', created_at + INTERVAL '3 hours') as hour,
                     COUNT(*) as count
                 FROM inventory_results
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
-                GROUP BY DATE_TRUNC('hour', created_at)
+                GROUP BY DATE_TRUNC('hour', created_at + INTERVAL '3 hours')
                 ORDER BY hour
             """)
             hourly_stats = []
@@ -2411,13 +2282,15 @@ def get_admin_stats():
                     'count': row['count']
                 })
         
-        return jsonify({
+        payload = {
             'success': True,
             'overall': overall,
             'employees': employees,
             'discrepancy_types': discrepancy_types,
             'hourly_stats': hourly_stats
-        })
+        }
+        _admin_cache_set(cache_key, payload)
+        return jsonify(payload)
     
     except Exception as e:
         logger.exception("Ошибка получения статистики")
@@ -2430,6 +2303,11 @@ def get_admin_latest_scans():
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
+
+    cache_key = "admin:latest_scans"
+    cached = _admin_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
 
     try:
         conn = get_db()
@@ -2461,7 +2339,9 @@ def get_admin_latest_scans():
                 'created_at': row['created_at'].isoformat() if row['created_at'] else None
             })
 
-        return jsonify({'success': True, 'scans': scans})
+        payload = {'success': True, 'scans': scans}
+        _admin_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         logger.exception("Ошибка получения последних сканов")
         return jsonify({'error': str(e)}), 500
@@ -2573,6 +2453,11 @@ def get_admin_activity():
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
 
+    cache_key = "admin:activity"
+    cached = _admin_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     try:
         conn = get_db()
         events = []
@@ -2615,7 +2500,9 @@ def get_admin_activity():
         events.sort(key=lambda item: item['timestamp'] or '', reverse=True)
         events = events[:30]
 
-        return jsonify({'success': True, 'events': events})
+        payload = {'success': True, 'events': events}
+        _admin_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         logger.exception("Ошибка получения ленты событий")
         return jsonify({'error': str(e)}), 500
@@ -2941,6 +2828,9 @@ def export_block_errors():
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
+    allowed, retry_after = _check_rate_limit("admin_export_block", limit=8, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов экспорта. Повторите через {retry_after} сек.'}), 429
 
     wh_id_str = request.args.get('wh_id') or request.args.get('block', '').strip()
     if not wh_id_str:
@@ -3035,27 +2925,48 @@ def export_block_errors():
         img_max_height = 60
         MAX_EMBEDDED_PHOTOS = 50 if IS_VERCEL else 100
 
+        # Оптимизация: убираем N+1 запросы по фото (bulk-fetch по result_id).
+        candidate_result_ids = []
+        for row in rows:
+            if len(candidate_result_ids) >= MAX_EMBEDDED_PHOTOS:
+                break
+            if row.get("photo_filename") and row.get("result_id"):
+                candidate_result_ids.append(row["result_id"])
+
+        photo_by_result_id = {}
+        if candidate_result_ids:
+            with conn.cursor() as cur_ph:
+                cur_ph.execute(
+                    """
+                    SELECT result_id, photo_data
+                    FROM inventory_results
+                    WHERE result_id = ANY(%s) AND photo_data IS NOT NULL
+                    """,
+                    (candidate_result_ids,),
+                )
+                for ph_row in cur_ph.fetchall():
+                    photo_by_result_id[ph_row["result_id"]] = ph_row.get("photo_data")
+
+                missing_ids = [rid for rid in candidate_result_ids if rid not in photo_by_result_id]
+                if missing_ids:
+                    cur_ph.execute(
+                        """
+                        SELECT DISTINCT ON (result_id) result_id, photo_data
+                        FROM inventory_result_photos
+                        WHERE result_id = ANY(%s) AND photo_data IS NOT NULL
+                        ORDER BY result_id, photo_id ASC
+                        """,
+                        (missing_ids,),
+                    )
+                    for ph_row in cur_ph.fetchall():
+                        photo_by_result_id[ph_row["result_id"]] = ph_row.get("photo_data")
+
         for excel_row_idx, row in enumerate(rows, start=2):
             created = row["created_at"]
             has_photo = bool(row.get("photo_filename"))
             photo_data = None
             if has_photo and row.get("result_id") and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
-                with conn.cursor() as cur_ph:
-                    cur_ph.execute(
-                        "SELECT photo_data FROM inventory_results WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
-                        (row["result_id"],),
-                    )
-                    ph_row = cur_ph.fetchone()
-                    if ph_row:
-                        photo_data = ph_row.get("photo_data")
-                    if not photo_data:
-                        cur_ph.execute(
-                            "SELECT photo_data FROM inventory_result_photos WHERE result_id = %s AND photo_data IS NOT NULL LIMIT 1",
-                            (row["result_id"],),
-                        )
-                        ph_row = cur_ph.fetchone()
-                        if ph_row:
-                            photo_data = ph_row.get("photo_data")
+                photo_data = photo_by_result_id.get(row["result_id"])
 
             photo_cell_value = "есть" if has_photo else ""
             if has_photo and photo_data and (excel_row_idx - 2) < MAX_EMBEDDED_PHOTOS:
@@ -3131,6 +3042,9 @@ def export_employees():
     admin_badge = request.cookies.get('admin_badge')
     if not admin_badge or admin_badge != 'ADMIN':
         return jsonify({'error': 'Доступ запрещен'}), 403
+    allowed, retry_after = _check_rate_limit("admin_export_employees", limit=8, window_seconds=60)
+    if not allowed:
+        return jsonify({'error': f'Слишком много запросов экспорта. Повторите через {retry_after} сек.'}), 429
 
     date_from, date_to = _admin_period_dates()
     try:
@@ -3312,7 +3226,7 @@ def download_report(report_id):
 
             raw_data = row['file_data']
             if raw_data is None or (hasattr(raw_data, '__len__') and len(raw_data) == 0):
-                return jsonify({'error': 'Файл отчёта отсутствует'}), 404
+                return jsonify({'error': 'Файл отчёта удалён (хранится 30 дней). Сформируйте новый отчёт.'}), 404
 
             file_data = bytes(raw_data)
             filename = row['filename'] or f'report_{report_id}.xlsx'
@@ -3380,6 +3294,46 @@ def get_result_photo(result_id):
     
     except Exception as e:
         logger.exception("Ошибка при получении фото")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/photo_file/<int:photo_id>', methods=['GET'])
+def get_photo_file(photo_id: int):
+    """Получить фото (доп. фото) из inventory_result_photos для админ-панели."""
+    admin_badge = request.cookies.get('admin_badge')
+    if not admin_badge or admin_badge != 'ADMIN':
+        return jsonify({'error': 'Доступ запрещен'}), 403
+
+    try:
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT photo_data, photo_filename
+                FROM inventory_result_photos
+                WHERE photo_id = %s AND photo_data IS NOT NULL
+                """,
+                (photo_id,),
+            )
+            row = cur.fetchone()
+
+        if not row or not row["photo_data"]:
+            return jsonify({"error": "Фото не найдено"}), 404
+
+        mimetype = "image/jpeg"
+        if row["photo_filename"] and row["photo_filename"].endswith(".png"):
+            mimetype = "image/png"
+
+        from io import BytesIO
+        return send_file(
+            BytesIO(row["photo_data"]),
+            mimetype=mimetype,
+            as_attachment=False,
+            download_name=row["photo_filename"] or f"photo_{photo_id}.jpg",
+        )
+
+    except Exception as e:
+        logger.exception("Ошибка при получении фото доп. таблицы")
         return jsonify({'error': str(e)}), 500
 
 

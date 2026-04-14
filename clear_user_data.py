@@ -8,24 +8,18 @@
 Использует переменные окружения из .env (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD).
 """
 import os
-import sys
 
 from dotenv import load_dotenv
 load_dotenv()
 
-# Подключаем конфиг и get_db из app
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from scraper.database import DatabaseConfig
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-DB_CONFIG = DatabaseConfig(
-    host=os.environ.get("DB_HOST", "31.207.77.167"),
-    port=int(os.environ.get("DB_PORT", "5432")),
-    database=os.environ.get("DB_NAME", "botdb"),
-    user=os.environ.get("DB_USER", "aperepechkin"),
-    password=os.environ.get("DB_PASSWORD", "password"),
-)
+DB_HOST = os.environ.get("DB_HOST", "31.207.77.167")
+DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DB_NAME = os.environ.get("DB_NAME", "botdb")
+DB_USER = os.environ.get("DB_USER", "aperepechkin")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "password")
 
 
 def main():
@@ -36,11 +30,11 @@ def main():
         sys.exit(0)
     print("Подключение к БД...")
     conn = psycopg2.connect(
-        host=DB_CONFIG.host,
-        port=DB_CONFIG.port,
-        database=DB_CONFIG.database,
-        user=DB_CONFIG.user,
-        password=DB_CONFIG.password,
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
         cursor_factory=RealDictCursor,
     )
     conn.autocommit = False
