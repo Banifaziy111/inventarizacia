@@ -1002,6 +1002,7 @@ def export_user_history():
         ws.append(headers)
 
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        duplicate_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
         for cell in ws[1]:
             cell.font = Font(bold=True, color="FFFFFF")
             cell.alignment = Alignment(horizontal="center")
@@ -1111,6 +1112,14 @@ def export_user_history():
                     photo_cell_value,
                 ]
             )
+            is_duplicate = (
+                row.get("duplicate_row_num") is not None
+                or row.get("duplicate_shelf_num") is not None
+                or "[Задвойка подтверждена]" in str(row.get("comment") or "")
+            )
+            if is_duplicate:
+                for col in range(1, len(headers) + 1):
+                    ws.cell(row=excel_row_idx, column=col).fill = duplicate_fill
 
         ws.column_dimensions[get_column_letter(photo_col)].width = 18
 
@@ -1423,6 +1432,8 @@ def export_results():
             qty_fact = item.get('qty_shk_fact')
             status = item.get('status', '')
             has_discrepancy = item.get('has_discrepancy', False)
+            comment_text = str(item.get('comment') or '')
+            is_duplicate = bool(item.get('is_duplicate')) or ("[Задвойка подтверждена]" in comment_text)
             pc = item.get('place_cod')
             wp = place_info.get(pc) or {}
             
@@ -1436,8 +1447,12 @@ def export_results():
                 item.get('timestamp')
             ])
             
-            # Подсветка строк с расхождениями
-            if has_discrepancy and status != 'OK':
+            # Подсветка строк: подтверждённая задвойка приоритетно красным.
+            if is_duplicate:
+                for col in range(1, num_cols + 1):
+                    cell = ws.cell(row=row_num, column=col)
+                    cell.fill = red_fill
+            elif has_discrepancy and status != 'OK':
                 for col in range(1, num_cols + 1):
                     cell = ws.cell(row=row_num, column=col)
                     cell.fill = red_fill
@@ -2938,6 +2953,7 @@ def export_block_errors():
         ]
         ws.append(headers)
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        duplicate_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
         for cell in ws[1]:
             cell.font = Font(bold=True, color="FFFFFF")
             cell.alignment = Alignment(horizontal="center")
@@ -3048,6 +3064,14 @@ def export_block_errors():
                 row.get("duplicate_shelf_num") if row.get("duplicate_shelf_num") is not None else "",
                 photo_cell_value,
             ])
+            is_duplicate = (
+                row.get("duplicate_row_num") is not None
+                or row.get("duplicate_shelf_num") is not None
+                or "[Задвойка подтверждена]" in str(row.get("comment") or "")
+            )
+            if is_duplicate:
+                for col in range(1, len(headers) + 1):
+                    ws.cell(row=excel_row_idx, column=col).fill = duplicate_fill
 
         ws.column_dimensions[get_column_letter(photo_col)].width = 18
 
