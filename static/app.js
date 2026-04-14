@@ -13,8 +13,8 @@ const ANIMATE_SELECTORS = [
 let animationObserver = null;
 
 const PLACE_CACHE_KEY = "inventory-mx-cache";
-const PLACE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
-const PLACE_CACHE_MAX = 500;
+const PLACE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+const PLACE_CACHE_MAX = 6000;
 const SYNC_CURSOR_KEY = "inventory-sync-cursor";
 const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
 const SYNC_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 часов
@@ -87,8 +87,10 @@ const PlaceCache = {
                 if (!row) return;
                 const numId = row.place_cod != null ? String(row.place_cod) : "";
                 const strCode = row.place_name ? String(row.place_name).trim().toUpperCase() : "";
-                pushKey(numId, row);
-                pushKey(strCode, row);
+                // Для массовой синхронизации храним в первую очередь строковый код МХ:
+                // так экономим место в localStorage и покрываем основной сценарий сканирования.
+                if (strCode) pushKey(strCode, row);
+                else pushKey(numId, row);
             });
             while (store.order.length > PLACE_CACHE_MAX) {
                 const old = store.order.shift();
@@ -97,6 +99,16 @@ const PlaceCache = {
             localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(store));
         } catch (e) {
             console.warn("PlaceCache setMany error", e);
+        }
+    },
+    size() {
+        try {
+            const raw = localStorage.getItem(PLACE_CACHE_KEY);
+            if (!raw) return 0;
+            const store = JSON.parse(raw);
+            return Array.isArray(store?.order) ? store.order.length : 0;
+        } catch {
+            return 0;
         }
     },
 };
@@ -1496,6 +1508,13 @@ function initWorkPage() {
                 return;
             }
         }
+        if (!navigator.onLine) {
+            const msg = "Офлайн: МХ не найден в локальном кэше. Перед работой без сети выполните синхронизацию справочника.";
+            showAlert(placeAlert, msg, "warning");
+            logEvent(msg, "warning");
+            placeInput.classList.add("is-invalid");
+            return;
+        }
 
         const placeCard = document.getElementById("placeCard");
         if (placeCard) placeCard.classList.add("is-loading");
@@ -2560,6 +2579,8 @@ function initWorkPage() {
     const shouldAutoSyncCatalog = () => {
         if (!navigator.onLine) return false;
         if (document.visibilityState === "hidden") return false;
+        // Если офлайн-кэш слишком мал, принудительно досинхронизируем каталог.
+        if (PlaceCache.size() < 3000) return true;
         try {
             const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
             if (conn?.saveData) return false;
@@ -2599,6 +2620,7 @@ function initWorkPage() {
 
     window.addEventListener("online", async () => {
         updateOnlineStatus();
+        syncPlacesInChunks({ silent: true }).catch(() => {});
         const sent = await syncOfflineQueue();
         updateOfflineQueueUI();
         if (sent > 0) {
