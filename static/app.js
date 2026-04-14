@@ -709,6 +709,9 @@ function initWorkPage() {
     const statusButtonsContainer = document.getElementById("statusButtons");
     const statusLabel = document.getElementById("statusLabel");
     const commentInput = document.getElementById("commentInput");
+    const duplicateDetailsBlock = document.getElementById("duplicateDetailsBlock");
+    const duplicateRowInput = document.getElementById("duplicateRowInput");
+    const duplicateShelfInput = document.getElementById("duplicateShelfInput");
     const discrepancyReasonBlock = document.getElementById("discrepancyReasonBlock");
     const discrepancyReasonSelect = document.getElementById("discrepancyReasonSelect");
     const reasonDetailRow = document.getElementById("reasonDetailRow");
@@ -946,6 +949,60 @@ function initWorkPage() {
         return s.toUpperCase();
     }
 
+    function normalizePlaceKey(value) {
+        if (value == null) return "";
+        return String(value).trim().toUpperCase();
+    }
+
+    function collectPlaceKeys(placeCod, placeName) {
+        const keys = new Set();
+        const codeKey = normalizePlaceKey(placeCod);
+        const nameKey = normalizePlaceKey(placeName);
+        if (codeKey) keys.add(codeKey);
+        if (nameKey) keys.add(nameKey);
+        return Array.from(keys);
+    }
+
+    function rememberScannedPlace(placeCod, placeName) {
+        collectPlaceKeys(placeCod, placeName).forEach((k) => state.scannedPlaceCodes.add(k));
+    }
+
+    function syncDuplicateDetailsVisibility() {
+        if (!duplicateDetailsBlock) return;
+        const on = !!state.allowDuplicateForCurrentPlace;
+        duplicateDetailsBlock.classList.toggle("d-none", !on);
+    }
+
+    function parseDuplicateField(value) {
+        if (value == null || value === "") return null;
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 0) return null;
+        return Math.trunc(n);
+    }
+
+    function resolveDuplicateOnLoad(placeCod, placeData) {
+        state.allowDuplicateForCurrentPlace = false;
+        syncDuplicateDetailsVisibility();
+        const keys = collectPlaceKeys(placeData?.place_cod ?? placeCod, placeData?.place_name);
+        const isDuplicate = keys.some((k) => state.scannedPlaceCodes.has(k));
+        if (!isDuplicate) return "ok";
+
+        const confirmDuplicate = window.confirm(
+            "Такая ячейка уже сканировалась в текущей смене.\nЭто задвойка?"
+        );
+        if (!confirmDuplicate) {
+            showAlert(placeAlert, "Скан отменен: задвойка не подтверждена", "info");
+            logEvent("Повторный скан отменен пользователем", "info");
+            focusPlaceInput(true);
+            return "cancel";
+        }
+
+        state.allowDuplicateForCurrentPlace = true;
+        syncDuplicateDetailsVisibility();
+        setTimeout(() => duplicateRowInput?.focus(), 0);
+        return "confirmed";
+    }
+
     const SCAN_ONLY_STORAGE_KEY = "inventory_scan_only_mode";
     const state = {
         badge,
@@ -968,6 +1025,7 @@ function initWorkPage() {
         })(),
         lastSavedAt: null,
         recentScans: [],
+        allowDuplicateForCurrentPlace: false,
     };
     let qrScanner = null;
     let qrModalInstance = null;
@@ -1289,6 +1347,7 @@ function initWorkPage() {
         }
 
         const history = data.history || [];
+        history.forEach((item) => rememberScannedPlace(item?.place_cod, item?.place_name));
         state.recentScans = history.slice(0, 3);
         renderMiniRecentScans();
         if (!history.length) {
@@ -1416,7 +1475,12 @@ function initWorkPage() {
         if (!options.skipCache) {
             const cached = PlaceCache.get(placeCod);
             if (cached) {
+                const duplicateState = resolveDuplicateOnLoad(placeCod, cached);
+                if (duplicateState === "cancel") return;
                 applyPlaceData(cached, placeCod, true);
+                if (state.allowDuplicateForCurrentPlace) {
+                    showAlert(placeAlert, "Повторный скан подтвержден (задвойка)", "warning");
+                }
                 return;
             }
         }
@@ -1433,8 +1497,13 @@ function initWorkPage() {
             SoundFeedback.playError();
             return;
         }
+        const duplicateState = resolveDuplicateOnLoad(placeCod, data);
+        if (duplicateState === "cancel") return;
         PlaceCache.set(placeCod, data);
         applyPlaceData(data, placeCod, false);
+        if (state.allowDuplicateForCurrentPlace) {
+            showAlert(placeAlert, "Повторный скан подтвержден (задвойка)", "warning");
+        }
     }
 
     function clearPlaceCard() {
@@ -1474,6 +1543,10 @@ function initWorkPage() {
         const placeCard = document.getElementById("placeCard");
         if (placeCard) placeCard.classList.remove("is-loaded");
         state.lastMxCode = null;
+        state.allowDuplicateForCurrentPlace = false;
+        if (duplicateRowInput) duplicateRowInput.value = "";
+        if (duplicateShelfInput) duplicateShelfInput.value = "";
+        syncDuplicateDetailsVisibility();
         if (commentInput) commentInput.value = "";
         if (discrepancyReasonSelect) discrepancyReasonSelect.value = "";
         if (otherReasonInput) otherReasonInput.value = "";
@@ -1651,6 +1724,19 @@ function initWorkPage() {
             }
         }
 
+        let duplicateRow = null;
+        let duplicateShelf = null;
+        if (state.allowDuplicateForCurrentPlace) {
+            duplicateRow = parseDuplicateField(duplicateRowInput?.value);
+            duplicateShelf = parseDuplicateField(duplicateShelfInput?.value);
+            if (duplicateRow == null || duplicateShelf == null) {
+                showAlert(placeAlert, "Для задвойки укажите ряд и номер стеллажа", "warning");
+                logEvent("Для задвойки не заполнены ряд/стеллаж", "warning");
+                duplicateRowInput?.focus();
+                return;
+            }
+        }
+
         // Формируем причину: основной текст + подпункт (выпадающий или поле ввода) или «Другое»
         let discrepancyReason = '';
         if (skipReasonValidation && state.currentStatus === 'error') discrepancyReason = null;
@@ -1677,7 +1763,9 @@ function initWorkPage() {
             status: state.currentStatus,
             discrepancy_reason: discrepancyReason || null,
             comment: commentInput?.value?.trim() || null,
-            force_duplicate: false,
+            force_duplicate: !!state.allowDuplicateForCurrentPlace,
+            duplicate_row: duplicateRow,
+            duplicate_shelf: duplicateShelf,
             // Для обратной совместимости отправляем первое фото как photo,
             // а также полный массив photos для новой логики на сервере
             photo: state.photos[0] || state.photoData,
@@ -1705,6 +1793,15 @@ function initWorkPage() {
                 );
                 if (confirmDuplicate) {
                     payload.force_duplicate = true;
+                    state.allowDuplicateForCurrentPlace = true;
+                    syncDuplicateDetailsVisibility();
+                    payload.duplicate_row = parseDuplicateField(duplicateRowInput?.value);
+                    payload.duplicate_shelf = parseDuplicateField(duplicateShelfInput?.value);
+                    if (payload.duplicate_row == null || payload.duplicate_shelf == null) {
+                        showAlert(placeAlert, "Подтвердите задвойку и укажите ряд/стеллаж", "warning");
+                        duplicateRowInput?.focus();
+                        return;
+                    }
                     const secondTry = await API.post("/api/scan/complete", payload);
                     if (!secondTry.ok || secondTry.data?.error || !secondTry.data?.success) {
                         const secondError = secondTry.data?.error || "Не удалось сохранить задвойку";
@@ -1752,8 +1849,7 @@ function initWorkPage() {
         hideAlert(placeAlert);
         const result = data.result;
         if (result) {
-            const placeKey = (result.place_name || result.place_cod || "").toString().trim().toUpperCase();
-            if (placeKey) state.scannedPlaceCodes.add(placeKey);
+            rememberScannedPlace(result.place_cod, result.place_name);
             state.recentScans = [result, ...state.recentScans.filter((x) => {
                 const a = (x?.place_cod ?? x?.place_name ?? "").toString();
                 const b = (result?.place_cod ?? result?.place_name ?? "").toString();

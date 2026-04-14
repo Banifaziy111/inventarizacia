@@ -213,6 +213,8 @@ def ensure_tasks_table():
                     has_discrepancy BOOLEAN DEFAULT FALSE,
                     discrepancy_reason TEXT,
                     comment TEXT,
+                    duplicate_row_num INTEGER,
+                    duplicate_shelf_num INTEGER,
                     photo_data BYTEA,
                     photo_filename VARCHAR(255),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -222,6 +224,8 @@ def ensure_tasks_table():
             # Миграция: колонки, которые используются в core/scans.py и в аналитике.
             cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS discrepancy_reason TEXT")
             cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS comment TEXT")
+            cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS duplicate_row_num INTEGER")
+            cur.execute("ALTER TABLE inventory_results ADD COLUMN IF NOT EXISTS duplicate_shelf_num INTEGER")
 
             # Таблица дополнительных фото к результатам инвентаризации
             cur.execute(
@@ -880,6 +884,8 @@ def export_user_history():
                     ir.photo_filename,
                     ir.discrepancy_reason,
                     ir.comment,
+                    ir.duplicate_row_num,
+                    ir.duplicate_shelf_num,
                     wp.storage_type,
                     wp.box_type,
                     wp.category,
@@ -952,12 +958,16 @@ def export_user_history():
                 return "Отсутствует"
             return status
 
-        def _error_description(reason, comment):
+        def _error_description(reason, comment, duplicate_row_num=None, duplicate_shelf_num=None):
             parts = []
             if reason:
                 parts.append(str(reason).strip())
             if comment:
                 parts.append(f"Коммент.: {str(comment).strip()}")
+            if duplicate_row_num is not None or duplicate_shelf_num is not None:
+                row_str = "" if duplicate_row_num is None else str(duplicate_row_num)
+                shelf_str = "" if duplicate_shelf_num is None else str(duplicate_shelf_num)
+                parts.append(f"Задвойка: ряд {row_str}, стеллаж {shelf_str}")
             return " | ".join(parts) if parts else "—"
 
         def _parse_mx_code(mx_code):
@@ -987,7 +997,7 @@ def export_user_history():
         headers = [
             "Дата/время", "Этаж", "Ряд", "Секция",
             "Код МХ", "ID места",
-            "Статус", "Что за ошибка (причина)", "Фото"
+            "Статус", "Что за ошибка (причина)", "Ряд (задвойка)", "Стеллаж (задвойка)", "Фото"
         ]
         ws.append(headers)
 
@@ -1090,7 +1100,14 @@ def export_user_history():
                     row["place_name"],
                     row["place_cod"],
                     _status_label(row.get("status")),
-                    _error_description(row.get("discrepancy_reason"), row.get("comment")),
+                    _error_description(
+                        row.get("discrepancy_reason"),
+                        row.get("comment"),
+                        row.get("duplicate_row_num"),
+                        row.get("duplicate_shelf_num"),
+                    ),
+                    row.get("duplicate_row_num") if row.get("duplicate_row_num") is not None else "",
+                    row.get("duplicate_shelf_num") if row.get("duplicate_shelf_num") is not None else "",
                     photo_cell_value,
                 ]
             )
@@ -2857,6 +2874,8 @@ def export_block_errors():
                     ir.photo_filename,
                     ir.discrepancy_reason,
                     ir.comment,
+                    ir.duplicate_row_num,
+                    ir.duplicate_shelf_num,
                     wp.storage_type,
                     wp.box_type,
                     wp.category,
@@ -2890,12 +2909,16 @@ def export_block_errors():
             if s == "missing": return "Отсутствует"
             return s
 
-        def _err_desc(reason, comment):
+        def _err_desc(reason, comment, duplicate_row_num=None, duplicate_shelf_num=None):
             parts = []
             if reason:
                 parts.append(str(reason).strip())
             if comment:
                 parts.append(f"Коммент.: {str(comment).strip()}")
+            if duplicate_row_num is not None or duplicate_shelf_num is not None:
+                row_str = "" if duplicate_row_num is None else str(duplicate_row_num)
+                shelf_str = "" if duplicate_shelf_num is None else str(duplicate_shelf_num)
+                parts.append(f"Задвойка: ряд {row_str}, стеллаж {shelf_str}")
             return " | ".join(parts) if parts else "—"
 
         import openpyxl
@@ -2911,7 +2934,7 @@ def export_block_errors():
         headers = [
             "Дата/время", "Этаж", "Ряд", "Секция",
             "Код МХ", "ID места", "Сотрудник",
-            "Статус", "Причина/коммент.", "Фото"
+            "Статус", "Причина/коммент.", "Ряд (задвойка)", "Стеллаж (задвойка)", "Фото"
         ]
         ws.append(headers)
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -3015,7 +3038,14 @@ def export_block_errors():
                 row["place_cod"],
                 row.get("badge") or "",
                 _status_label(row.get("status")),
-                _err_desc(row.get("discrepancy_reason"), row.get("comment")),
+                _err_desc(
+                    row.get("discrepancy_reason"),
+                    row.get("comment"),
+                    row.get("duplicate_row_num"),
+                    row.get("duplicate_shelf_num"),
+                ),
+                row.get("duplicate_row_num") if row.get("duplicate_row_num") is not None else "",
+                row.get("duplicate_shelf_num") if row.get("duplicate_shelf_num") is not None else "",
                 photo_cell_value,
             ])
 

@@ -61,6 +61,8 @@ def complete_scan_handler(get_db_fn):
     photos = data.get("photos") or []
     photo_raw = data.get("photo")
     force_duplicate = bool(data.get("force_duplicate"))
+    duplicate_row = data.get("duplicate_row")
+    duplicate_shelf = data.get("duplicate_shelf")
 
     status_norm = str(status).strip().lower() if status is not None else ""
 
@@ -71,6 +73,19 @@ def complete_scan_handler(get_db_fn):
         place_cod_int = int(place_cod)
     except (TypeError, ValueError):
         return jsonify({"error": "Некорректный place_cod"}), 400
+
+    duplicate_row_int = None
+    duplicate_shelf_int = None
+    if duplicate_row not in (None, ""):
+        try:
+            duplicate_row_int = int(duplicate_row)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Некорректный ряд для задвойки"}), 400
+    if duplicate_shelf not in (None, ""):
+        try:
+            duplicate_shelf_int = int(duplicate_shelf)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Некорректный номер стеллажа для задвойки"}), 400
 
     decoded_photos = _decode_photos(photos, photo_raw, place_cod)
     photo_data = decoded_photos[0][0] if decoded_photos else None
@@ -128,11 +143,19 @@ def complete_scan_handler(get_db_fn):
             )
             if cur.fetchone():
                 if force_duplicate:
+                    if duplicate_row_int is None or duplicate_shelf_int is None:
+                        return jsonify(
+                            {
+                                "error": "Для задвойки укажите ряд и номер стеллажа",
+                                "code": "duplicate_details_required",
+                            }
+                        ), 400
                     # Пользователь подтвердил, что это сознательная задвойка.
                     marker = "[Задвойка подтверждена]"
                     comment_text = (comment or "").strip()
                     if marker not in comment_text:
-                        comment = f"{comment_text} {marker}".strip() if comment_text else marker
+                        details = f"{marker} Ряд: {duplicate_row_int}, Стеллаж: {duplicate_shelf_int}"
+                        comment = f"{comment_text} {details}".strip() if comment_text else details
                 else:
                     return jsonify(
                         {
@@ -147,8 +170,8 @@ def complete_scan_handler(get_db_fn):
                 """
                 INSERT INTO inventory_results
                 (badge, place_cod, place_name, qty_shk_db, qty_shk_fact, status, has_discrepancy,
-                 photo_data, photo_filename, discrepancy_reason, comment)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 photo_data, photo_filename, discrepancy_reason, comment, duplicate_row_num, duplicate_shelf_num)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING result_id, created_at
                 """,
                 (
@@ -163,6 +186,8 @@ def complete_scan_handler(get_db_fn):
                     photo_filename,
                     discrepancy_reason or None,
                     comment or None,
+                    duplicate_row_int if force_duplicate else None,
+                    duplicate_shelf_int if force_duplicate else None,
                 ),
             )
             inserted = cur.fetchone()
@@ -194,6 +219,8 @@ def complete_scan_handler(get_db_fn):
                     "has_discrepancy": has_discrepancy,
                     "has_photo": photo_data is not None,
                     "is_duplicate": force_duplicate,
+                    "duplicate_row_num": duplicate_row_int if force_duplicate else None,
+                    "duplicate_shelf_num": duplicate_shelf_int if force_duplicate else None,
                     "comment": comment,
                     "created_at": inserted["created_at"].isoformat()
                     if inserted and inserted["created_at"]
