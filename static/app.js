@@ -19,7 +19,6 @@ const SYNC_CURSOR_KEY = "inventory-sync-cursor";
 const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
 const SYNC_LAST_BLOCKS_KEY = "inventory-sync-last-blocks";
 const SYNC_LAST_FLOORS_KEY = "inventory-sync-last-floors";
-const SYNC_AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 часов
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
 
 // Ограничение размера фото для отправки (Vercel лимит тела запроса 4.5 MB)
@@ -2850,30 +2849,6 @@ function initWorkPage() {
     renderMiniRecentScans();
     setInterval(updateLastScanAgoChip, 30000);
     focusPlaceInput();
-    // Автосинхронизация справочника: редко и только при хороших условиях.
-    const shouldAutoSyncCatalog = () => {
-        if (!navigator.onLine) return false;
-        if (document.visibilityState === "hidden") return false;
-        // Если офлайн-кэш слишком мал, принудительно досинхронизируем каталог.
-        if (PlaceCache.size() < 3000) return true;
-        try {
-            const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-            if (conn?.saveData) return false;
-            const et = String(conn?.effectiveType || "").toLowerCase();
-            if (et && (et.includes("2g") || et.includes("slow-2g"))) return false;
-        } catch (_) {}
-        try {
-            const lastAtRaw = localStorage.getItem(SYNC_LAST_AT_KEY);
-            const lastTs = lastAtRaw ? Date.parse(lastAtRaw) : 0;
-            if (lastTs && Number.isFinite(lastTs) && (Date.now() - lastTs) < SYNC_AUTO_INTERVAL_MS) {
-                return false;
-            }
-        } catch (_) {}
-        return true;
-    };
-    if (shouldAutoSyncCatalog()) {
-        setTimeout(() => syncPlacesInChunks({ silent: true }), 1500);
-    }
 
     offlineQueueSyncBtn?.addEventListener("click", async () => {
         if (!navigator.onLine) {
@@ -2895,7 +2870,6 @@ function initWorkPage() {
 
     window.addEventListener("online", async () => {
         updateOnlineStatus();
-        syncPlacesInChunks({ silent: true }).catch(() => {});
         const sent = await syncOfflineQueue();
         updateOfflineQueueUI();
         if (sent > 0) {
