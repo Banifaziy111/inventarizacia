@@ -1721,6 +1721,68 @@ function initWorkPage() {
         return s.toUpperCase();
     }
 
+    function extractPlaceCodeFromQr(decodedText) {
+        if (!decodedText || typeof decodedText !== "string") return "";
+        const safeDecode = (value) => {
+            try {
+                return decodeURIComponent(value);
+            } catch (e) {
+                return value;
+            }
+        };
+        const addCandidate = (set, value) => {
+            if (!value) return;
+            const raw = safeDecode(String(value)).trim();
+            if (!raw) return;
+            const normalized = normalizePlaceCode(raw).replace(/^["'`]+|["'`]+$/g, "");
+            if (!normalized) return;
+            set.add(normalized);
+        };
+
+        const rawText = decodedText.trim();
+        const candidates = new Set();
+        addCandidate(candidates, rawText);
+        addCandidate(candidates, rawText.replace(/^PLCE\s*/i, ""));
+
+        // Частый кейс: QR содержит URL, где код лежит в query/path.
+        try {
+            const url = new URL(rawText);
+            ["mx_id", "mx", "place_cod", "place", "code"].forEach((key) => {
+                addCandidate(candidates, url.searchParams.get(key));
+            });
+            url.pathname
+                .split("/")
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .forEach((part) => addCandidate(candidates, part));
+        } catch (e) {}
+
+        safeDecode(rawText)
+            .split(/[\s,;|/?&#=:]+/)
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .forEach((part) => addCandidate(candidates, part));
+
+        const valid = Array.from(candidates)
+            .map((candidate) => candidate.replace(/^PLCE\s*/i, "").trim())
+            .filter((candidate) => /^[А-ЯЁA-Z0-9.\-]+$/i.test(candidate));
+
+        if (!valid.length) return "";
+
+        const score = (candidate) => {
+            let value = 0;
+            if (/^\d{6,}$/.test(candidate)) value += 30; // MX id
+            if (/[А-ЯЁA-Z]/i.test(candidate)) value += 10;
+            if (/[.\-]/.test(candidate)) value += 6;
+            if (/\d/.test(candidate)) value += 8;
+            value += Math.min(candidate.length, 20);
+            return value;
+        };
+
+        valid.sort((a, b) => score(b) - score(a));
+        return valid[0] || "";
+    }
+
     function normalizePlaceKey(value) {
         if (value == null) return "";
         return String(value).trim().toUpperCase();
@@ -3050,14 +3112,12 @@ function initWorkPage() {
             return;
         }
 
-        // Убираем префикс PLCE, извлекаем код МХ (числовой ID или буквенный код)
-        const cleanedText = decodedText.trim();
-        const match = cleanedText.replace(/^PLCE\s*/i, "").match(/[А-ЯЁA-Z0-9\.]+/);
-        if (!match) {
+        // Извлекаем код МХ из разных форматов (PLCE, URL, чистый код).
+        const placeCod = extractPlaceCodeFromQr(decodedText);
+        if (!placeCod) {
             updateQrStatus("QR не содержит корректный код МХ", "danger");
             return;
         }
-        const placeCod = normalizePlaceCode(match[0]) || match[0].toUpperCase();
         placeInput.value = placeCod;
         showToastMessage("QR-код считан");
         closeQrOverlay();
