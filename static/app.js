@@ -15,27 +15,215 @@ let animationObserver = null;
 const PLACE_CACHE_KEY = "inventory-mx-cache";
 const PLACE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 const PLACE_CACHE_MAX = 6000;
+const PLACE_CACHE_FLUSH_DEBOUNCE_MS = 1500;
+const PLACE_IDB_NAME = "inventory-offline-db";
+const PLACE_IDB_STORE = "places";
+const PLACE_IDB_VERSION = 1;
 const SYNC_CURSOR_KEY = "inventory-sync-cursor";
 const SYNC_LAST_AT_KEY = "inventory-sync-last-at";
 const SYNC_LAST_BLOCKS_KEY = "inventory-sync-last-blocks";
 const SYNC_LAST_FLOORS_KEY = "inventory-sync-last-floors";
+const SYNC_META_CACHE_TTL_MS = 5 * 60 * 1000;
 const OFFLINE_QUEUE_KEY = "inventory-offline-queue";
+const OFFLINE_RETRY_BASE_MS = 5000;
+const OFFLINE_RETRY_MAX_MS = 120000;
+const OFFLINE_AUTO_SYNC_INTERVAL_MS = 12000;
+const API_REQUEST_TIMEOUT_MS = 9000;
+const API_SCAN_COMPLETE_TIMEOUT_MS = 2500;
 
 // Ограничение размера фото для отправки (Vercel лимит тела запроса 4.5 MB)
 const MAX_PHOTO_DIMENSION = 1280;
 const PHOTO_JPEG_QUALITY = 0.82;
 const MAX_PHOTO_BASE64_BYTES = 3 * 1024 * 1024; // ~3 MB на фото, чтобы несколько фото + JSON укладывались в 4.5 MB
 
+let _placeCacheStore = null;
+let _placeCacheDirty = false;
+let _placeCacheFlushTimer = null;
+let _placeIdbPromise = null;
+let _placeIdbWriteTail = Promise.resolve();
+
+function normalizePlaceCacheStore(store) {
+    const src = store && typeof store === "object" ? store : {};
+    const items = src.items && typeof src.items === "object" ? src.items : {};
+    const order = Array.isArray(src.order) ? src.order : Object.keys(items);
+    return { items, order };
+}
+
+function backfillPlaceCacheAliases(store) {
+    const safeStore = normalizePlaceCacheStore(store);
+    const orderSet = new Set(safeStore.order || []);
+    let changed = false;
+    Object.entries(safeStore.items || {}).forEach(([existingKey, entry]) => {
+        const data = entry?.data;
+        if (!data) return;
+        const nowTs = Number(entry?.ts) || Date.now();
+        const keyNorm = String(existingKey || "").trim().toUpperCase();
+        const numId = data.place_cod != null ? String(data.place_cod).trim().toUpperCase() : "";
+        const strCode = data.place_name ? String(data.place_name).trim().toUpperCase() : "";
+        [numId, strCode].forEach((alias) => {
+            if (!alias || alias === keyNorm || safeStore.items[alias]) return;
+            safeStore.items[alias] = { data, ts: nowTs };
+            if (!orderSet.has(alias)) {
+                safeStore.order.push(alias);
+                orderSet.add(alias);
+            }
+            changed = true;
+        });
+    });
+    while (safeStore.order.length > PLACE_CACHE_MAX) {
+        const old = safeStore.order.shift();
+        if (old) {
+            delete safeStore.items[old];
+            changed = true;
+        }
+    }
+    return { store: safeStore, changed };
+}
+
+function loadPlaceCacheStore() {
+    if (_placeCacheStore) return _placeCacheStore;
+    try {
+        const raw = localStorage.getItem(PLACE_CACHE_KEY);
+        const normalized = normalizePlaceCacheStore(raw ? JSON.parse(raw) : null);
+        const backfilled = backfillPlaceCacheAliases(normalized);
+        _placeCacheStore = backfilled.store;
+        if (backfilled.changed) {
+            try {
+                localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(_placeCacheStore));
+            } catch (_) {}
+        }
+    } catch {
+        _placeCacheStore = { items: {}, order: [] };
+    }
+    return _placeCacheStore;
+}
+
+function persistPlaceCacheStore() {
+    if (!_placeCacheStore) return;
+    try {
+        localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(_placeCacheStore));
+        _placeCacheDirty = false;
+    } catch (e) {
+        console.warn("PlaceCache persist error", e);
+    }
+}
+
+function schedulePlaceCacheFlush() {
+    _placeCacheDirty = true;
+    if (_placeCacheFlushTimer != null) return;
+    _placeCacheFlushTimer = window.setTimeout(() => {
+        _placeCacheFlushTimer = null;
+        if (_placeCacheDirty) persistPlaceCacheStore();
+    }, PLACE_CACHE_FLUSH_DEBOUNCE_MS);
+}
+
+function buildPlaceLookupVariants(rawKey) {
+    const variants = new Set();
+    const pushVariant = (v) => {
+        const s = String(v || "").trim().toUpperCase();
+        if (s) variants.add(s);
+    };
+    const base = String(rawKey || "").trim().toUpperCase();
+    pushVariant(base);
+    const plceMatch = base.match(/^PLCE\s*(.+)$/i);
+    if (plceMatch) pushVariant(plceMatch[1]);
+    pushVariant(base.replace(/\s+/g, ""));
+    if (/^\d+$/.test(base)) pushVariant(base.replace(/^0+/, "") || "0");
+    return Array.from(variants);
+}
+
+function openPlaceIdb() {
+    if (_placeIdbPromise) return _placeIdbPromise;
+    _placeIdbPromise = new Promise((resolve) => {
+        if (typeof indexedDB === "undefined") {
+            resolve(null);
+            return;
+        }
+        const req = indexedDB.open(PLACE_IDB_NAME, PLACE_IDB_VERSION);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(PLACE_IDB_STORE)) {
+                db.createObjectStore(PLACE_IDB_STORE, { keyPath: "key" });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => {
+            console.warn("IndexedDB open error", req.error);
+            resolve(null);
+        };
+    });
+    return _placeIdbPromise;
+}
+
+function idbRecordsFromPlaceRow(row) {
+    if (!row || typeof row !== "object") return [];
+    const records = [];
+    const now = Date.now();
+    const pushRecord = (key) => {
+        const normalized = String(key || "").trim().toUpperCase();
+        if (!normalized) return;
+        records.push({ key: normalized, data: row, ts: now });
+    };
+    pushRecord(row.place_cod);
+    pushRecord(row.place_name);
+    return records;
+}
+
+function queuePlaceRowsForIdb(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    _placeIdbWriteTail = _placeIdbWriteTail
+        .then(async () => {
+            const db = await openPlaceIdb();
+            if (!db) return;
+            const records = rows.flatMap(idbRecordsFromPlaceRow);
+            if (!records.length) return;
+            await new Promise((resolve) => {
+                const tx = db.transaction(PLACE_IDB_STORE, "readwrite");
+                const store = tx.objectStore(PLACE_IDB_STORE);
+                records.forEach((rec) => store.put(rec));
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+                tx.onabort = () => resolve();
+            });
+        })
+        .catch(() => {});
+}
+
+async function lookupPlaceInIdb(rawKey) {
+    const db = await openPlaceIdb();
+    if (!db) return null;
+    const variants = buildPlaceLookupVariants(rawKey);
+    for (const key of variants) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await new Promise((resolve) => {
+            const tx = db.transaction(PLACE_IDB_STORE, "readonly");
+            const req = tx.objectStore(PLACE_IDB_STORE).get(key);
+            req.onsuccess = () => resolve(req.result?.data || null);
+            req.onerror = () => resolve(null);
+        });
+        if (result) return result;
+    }
+    return null;
+}
+
+window.addEventListener("beforeunload", () => {
+    if (_placeCacheDirty) persistPlaceCacheStore();
+});
+
 const PlaceCache = {
     get(key) {
         try {
-            const raw = localStorage.getItem(PLACE_CACHE_KEY);
-            if (!raw) return null;
-            const store = JSON.parse(raw);
+            const store = loadPlaceCacheStore();
             const k = String(key).trim().toUpperCase();
             const entry = store.items?.[k];
             if (!entry || !entry.data) return null;
-            if (Date.now() - (entry.ts || 0) > PLACE_CACHE_TTL_MS) return null;
+            if (Date.now() - (entry.ts || 0) > PLACE_CACHE_TTL_MS) {
+                delete store.items[k];
+                const idx = store.order.indexOf(k);
+                if (idx >= 0) store.order.splice(idx, 1);
+                schedulePlaceCacheFlush();
+                return null;
+            }
             return entry.data;
         } catch {
             return null;
@@ -43,28 +231,37 @@ const PlaceCache = {
     },
     set(key, data) {
         try {
-            const raw = localStorage.getItem(PLACE_CACHE_KEY);
-            const store = raw ? JSON.parse(raw) : { items: {}, order: [] };
-            store.items = store.items || {};
-            store.order = store.order || [];
+            const store = loadPlaceCacheStore();
             const k = String(key).trim().toUpperCase();
-            store.items[k] = { data, ts: Date.now() };
-            if (!store.order.includes(k)) store.order.push(k);
+            const now = Date.now();
+            const orderSet = new Set(store.order);
+            store.items[k] = { data, ts: now };
+            if (!orderSet.has(k)) {
+                store.order.push(k);
+                orderSet.add(k);
+            }
             const numId = data.place_cod != null ? String(data.place_cod) : null;
             const strCode = data.place_name ? String(data.place_name).trim().toUpperCase() : null;
             if (numId && numId !== k) {
-                store.items[numId] = { data, ts: Date.now() };
-                if (!store.order.includes(numId)) store.order.push(numId);
+                store.items[numId] = { data, ts: now };
+                if (!orderSet.has(numId)) {
+                    store.order.push(numId);
+                    orderSet.add(numId);
+                }
             }
             if (strCode && strCode !== k && strCode !== numId) {
-                store.items[strCode] = { data, ts: Date.now() };
-                if (!store.order.includes(strCode)) store.order.push(strCode);
+                store.items[strCode] = { data, ts: now };
+                if (!orderSet.has(strCode)) {
+                    store.order.push(strCode);
+                    orderSet.add(strCode);
+                }
             }
             while (store.order.length > PLACE_CACHE_MAX) {
                 const old = store.order.shift();
                 if (old) delete store.items[old];
             }
-            localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(store));
+            schedulePlaceCacheFlush();
+            queuePlaceRowsForIdb([data]);
         } catch (e) {
             console.warn("PlaceCache set error", e);
         }
@@ -72,45 +269,85 @@ const PlaceCache = {
     setMany(rows) {
         try {
             if (!Array.isArray(rows) || rows.length === 0) return;
-            const raw = localStorage.getItem(PLACE_CACHE_KEY);
-            const store = raw ? JSON.parse(raw) : { items: {}, order: [] };
-            store.items = store.items || {};
-            store.order = store.order || [];
+            const store = loadPlaceCacheStore();
             const now = Date.now();
+            const orderSet = new Set(store.order);
             const pushKey = (k, data) => {
                 if (!k) return;
                 const key = String(k).trim().toUpperCase();
                 if (!key) return;
                 store.items[key] = { data, ts: now };
-                if (!store.order.includes(key)) store.order.push(key);
+                if (!orderSet.has(key)) {
+                    store.order.push(key);
+                    orderSet.add(key);
+                }
             };
             rows.forEach((row) => {
                 if (!row) return;
                 const numId = row.place_cod != null ? String(row.place_cod) : "";
                 const strCode = row.place_name ? String(row.place_name).trim().toUpperCase() : "";
-                // Для массовой синхронизации храним в первую очередь строковый код МХ:
-                // так экономим место в localStorage и покрываем основной сценарий сканирования.
+                // Для офлайн-работы поддерживаем оба варианта ввода:
+                // numeric place_cod (сканеры/QR) и string place_name (ручной ввод).
                 if (strCode) pushKey(strCode, row);
-                else pushKey(numId, row);
+                if (numId) pushKey(numId, row);
             });
             while (store.order.length > PLACE_CACHE_MAX) {
                 const old = store.order.shift();
                 if (old) delete store.items[old];
             }
-            localStorage.setItem(PLACE_CACHE_KEY, JSON.stringify(store));
+            schedulePlaceCacheFlush();
+            queuePlaceRowsForIdb(rows);
         } catch (e) {
             console.warn("PlaceCache setMany error", e);
         }
     },
+    flush() {
+        if (_placeCacheFlushTimer != null) {
+            clearTimeout(_placeCacheFlushTimer);
+            _placeCacheFlushTimer = null;
+        }
+        if (_placeCacheDirty) persistPlaceCacheStore();
+    },
     size() {
         try {
-            const raw = localStorage.getItem(PLACE_CACHE_KEY);
-            if (!raw) return 0;
-            const store = JSON.parse(raw);
+            const store = loadPlaceCacheStore();
             return Array.isArray(store?.order) ? store.order.length : 0;
         } catch {
             return 0;
         }
+    },
+    lookup(rawKey) {
+        try {
+            const variants = new Set(buildPlaceLookupVariants(rawKey));
+
+            for (const key of variants) {
+                const item = this.get(key);
+                if (item) return item;
+            }
+
+            const store = loadPlaceCacheStore();
+            const byValues = Object.values(store.items || {});
+            for (const entry of byValues) {
+                const data = entry?.data;
+                if (!data) continue;
+                const code = String(data.place_cod ?? "").trim().toUpperCase();
+                const name = String(data.place_name ?? "").trim().toUpperCase();
+                const codeNoSpaces = code.replace(/\s+/g, "");
+                const nameNoSpaces = name.replace(/\s+/g, "");
+                const codeNoZeros = /^\d+$/.test(code) ? (code.replace(/^0+/, "") || "0") : "";
+                if (variants.has(code) || variants.has(name) || variants.has(codeNoSpaces) || variants.has(nameNoSpaces) || (codeNoZeros && variants.has(codeNoZeros))) {
+                    return data;
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    },
+    async lookupAsync(rawKey) {
+        const local = this.lookup(rawKey);
+        if (local) return local;
+        return await lookupPlaceInIdb(rawKey);
     },
 };
 
@@ -147,22 +384,69 @@ const SoundFeedback = {
     },
 };
 
+function makeOfflineQueueId() {
+    return `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function computeRetryDelayMs(attempts) {
+    const safeAttempts = Math.max(1, Number(attempts) || 1);
+    const exp = Math.min(OFFLINE_RETRY_MAX_MS, OFFLINE_RETRY_BASE_MS * Math.pow(2, safeAttempts - 1));
+    const jitter = Math.round(exp * (0.25 * Math.random()));
+    return Math.min(OFFLINE_RETRY_MAX_MS, exp + jitter);
+}
+
+function normalizeQueueItem(item) {
+    const src = item || {};
+    const body = src.body && typeof src.body === "object" ? src.body : {};
+    const attempts = Number.isFinite(Number(src.attempts)) ? Math.max(0, Number(src.attempts)) : 0;
+    const status = src.status === "conflict" ? "conflict" : "pending";
+    return {
+        qid: src.qid || makeOfflineQueueId(),
+        path: src.path || "/api/scan/complete",
+        body,
+        ts: Number.isFinite(Number(src.ts)) ? Number(src.ts) : Date.now(),
+        attempts,
+        lastError: src.lastError ? String(src.lastError) : "",
+        nextRetryAt: Number.isFinite(Number(src.nextRetryAt)) ? Number(src.nextRetryAt) : 0,
+        status,
+    };
+}
+
+function isRetryableScanError(status, data = null) {
+    if (status >= 500) return true;
+    if (status === 408 || status === 425 || status === 429) return true;
+    if (status === 0) return true;
+    if (data?.code === "duplicate_in_shift" || data?.confirm_required) return false;
+    return false;
+}
+
+function parseQueueResponseError(data, fallback) {
+    const msg = data?.error || data?.message || fallback;
+    return String(msg || "Ошибка отправки");
+}
+
 const OfflineQueue = {
     push(payload) {
         try {
             const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
             const queue = raw ? JSON.parse(raw) : [];
-            queue.push({ ...payload, ts: Date.now() });
+            const item = normalizeQueueItem(payload);
+            queue.push(item);
             localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-            return queue.length;
+            return { ok: true, length: queue.length, item };
         } catch (e) {
-            return 0;
+            return { ok: false, length: 0, error: e };
         }
     },
     getAll() {
         try {
             const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-            return raw ? JSON.parse(raw) : [];
+            const parsed = raw ? JSON.parse(raw) : [];
+            const normalized = Array.isArray(parsed) ? parsed.map(normalizeQueueItem) : [];
+            if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
+                localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+            }
+            return normalized;
         } catch {
             return [];
         }
@@ -171,9 +455,39 @@ const OfflineQueue = {
         localStorage.removeItem(OFFLINE_QUEUE_KEY);
     },
     set(items) {
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items));
+        try {
+            const normalized = Array.isArray(items) ? items.map(normalizeQueueItem) : [];
+            localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+            return true;
+        } catch {
+            return false;
+        }
     },
 };
+
+function enqueueScanForSync({ path = "/api/scan/complete", body = {}, reason = "Нет связи" } = {}) {
+    const pushResult = OfflineQueue.push({
+        path,
+        body,
+        attempts: 0,
+        lastError: String(reason || ""),
+        nextRetryAt: Date.now(),
+        status: "pending",
+    });
+    if (!pushResult.ok) {
+        return {
+            ok: false,
+            message: "Не удалось сохранить в офлайн-очередь. Проверьте свободное место в браузере.",
+            error: pushResult.error,
+            length: 0,
+        };
+    }
+    return {
+        ok: true,
+        message: "Сохранено в очередь. Синхронизация выполнится при появлении сети.",
+        length: pushResult.length,
+    };
+}
 
 let _offlineSyncInFlight = null;
 
@@ -181,9 +495,15 @@ async function syncOfflineQueue() {
     if (_offlineSyncInFlight) return _offlineSyncInFlight;
     _offlineSyncInFlight = (async () => {
         const queue = OfflineQueue.getAll();
-        if (!queue.length || !navigator.onLine) return 0;
+        if (!queue.length || !navigator.onLine) return { sent: 0, left: queue.length, conflicts: queue.filter((x) => x.status === "conflict").length };
+        const nowTs = Date.now();
         const remaining = [];
+        let sent = 0;
         for (const item of queue) {
+            if (item.status !== "conflict" && item.nextRetryAt && item.nextRetryAt > nowTs) {
+                remaining.push(item);
+                continue;
+            }
             try {
                 const res = await fetch("/api/scan/complete", {
                     method: "POST",
@@ -192,16 +512,46 @@ async function syncOfflineQueue() {
                     body: JSON.stringify(item.body || (item.place_cod ? item : item.body) || {}),
                 });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok || data.error) remaining.push(item);
+                if (res.ok && !data.error) {
+                    sent += 1;
+                    continue;
+                }
+                const status = Number(res.status) || 0;
+                const retryable = isRetryableScanError(status, data);
+                const attempts = (item.attempts || 0) + 1;
+                if (retryable) {
+                    remaining.push({
+                        ...item,
+                        attempts,
+                        status: "pending",
+                        lastError: parseQueueResponseError(data, `HTTP ${status}`),
+                        nextRetryAt: Date.now() + computeRetryDelayMs(attempts),
+                    });
+                } else {
+                    remaining.push({
+                        ...item,
+                        attempts,
+                        status: "conflict",
+                        lastError: parseQueueResponseError(data, `HTTP ${status}`),
+                        nextRetryAt: 0,
+                    });
+                }
             } catch (_) {
-                remaining.push(item);
+                const attempts = (item.attempts || 0) + 1;
+                remaining.push({
+                    ...item,
+                    attempts,
+                    status: "pending",
+                    lastError: "Ошибка сети при отправке",
+                    nextRetryAt: Date.now() + computeRetryDelayMs(attempts),
+                });
             }
         }
 
         // merge-safe: учитываем новые элементы, добавленные пока шёл sync
         const latest = OfflineQueue.getAll();
-        const sentSet = new Set(queue.map((x) => JSON.stringify(x)));
-        const newItems = latest.filter((x) => !sentSet.has(JSON.stringify(x)));
+        const sentSet = new Set(queue.map((x) => x.qid));
+        const newItems = latest.filter((x) => !sentSet.has(x.qid));
         const merged = [...remaining, ...newItems];
 
         if (merged.length === 0) {
@@ -209,7 +559,7 @@ async function syncOfflineQueue() {
         } else {
             OfflineQueue.set(merged);
         }
-        return queue.length - remaining.length;
+        return { sent, left: merged.length, conflicts: merged.filter((x) => x.status === "conflict").length };
     })();
     try {
         return await _offlineSyncInFlight;
@@ -232,10 +582,54 @@ const API = {
         if (config.body && typeof config.body !== "string") {
             config.body = JSON.stringify(config.body);
         }
+        const timeoutMs = path.includes("/api/scan/complete")
+            ? API_SCAN_COMPLETE_TIMEOUT_MS
+            : API_REQUEST_TIMEOUT_MS;
+        const ownController = !config.signal && typeof AbortController !== "undefined";
+        const controller = ownController ? new AbortController() : null;
+        let timeoutId = null;
+        if (controller) {
+            config.signal = controller.signal;
+            timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+        }
 
         try {
             const response = await fetch(path, config);
             const data = await response.json().catch(() => ({}));
+            const isScanCompletePost = path.includes("/api/scan/complete") && (options.method === "POST" || config.method === "POST");
+            if (!response.ok && isScanCompletePost && isRetryableScanError(response.status, data)) {
+                try {
+                    const body = typeof config.body === "string" ? JSON.parse(config.body) : {};
+                    const queued = enqueueScanForSync({
+                        path,
+                        body,
+                        reason: parseQueueResponseError(data, `HTTP ${response.status}`),
+                    });
+                    if (queued.ok) {
+                        return {
+                            ok: false,
+                            status: response.status,
+                            data: {
+                                ...(data || {}),
+                                queued: true,
+                                error: queued.message,
+                                original_error: parseQueueResponseError(data, `HTTP ${response.status}`),
+                            },
+                        };
+                    }
+                    return {
+                        ok: false,
+                        status: response.status,
+                        data: {
+                            ...(data || {}),
+                            queued: false,
+                            queue_write_failed: true,
+                            error: queued.message,
+                            original_error: parseQueueResponseError(data, `HTTP ${response.status}`),
+                        },
+                    };
+                } catch (_) {}
+            }
 
             return {
                 ok: response.ok,
@@ -243,11 +637,17 @@ const API = {
                 data,
             };
         } catch (error) {
-            if (!navigator.onLine && path.includes("/api/scan/complete") && (options.method === "POST" || config.method === "POST")) {
+            if (path.includes("/api/scan/complete") && (options.method === "POST" || config.method === "POST")) {
                 try {
                     const body = typeof config.body === "string" ? JSON.parse(config.body) : {};
-                    OfflineQueue.push({ path, body });
-                    return { ok: false, status: 0, data: { error: "Сохранено в очередь. Синхронизация при появлении сети." } };
+                    const queued = enqueueScanForSync({ path, body, reason: String(error?.message || "Ошибка сети") });
+                    return {
+                        ok: false,
+                        status: 0,
+                        data: queued.ok
+                            ? { queued: true, error: queued.message }
+                            : { queued: false, queue_write_failed: true, error: queued.message },
+                    };
                 } catch (_) {}
             }
             console.error("API error", error);
@@ -256,6 +656,8 @@ const API = {
                 status: 0,
                 data: { error: "Не удалось связаться с сервером" },
             };
+        } finally {
+            if (timeoutId != null) window.clearTimeout(timeoutId);
         }
     },
 
@@ -271,6 +673,36 @@ const API = {
         return this.request(path, { method: "DELETE" });
     },
 };
+
+async function fetchJsonWithTimeout(path, timeoutMs = 4500) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(path, { method: "GET", credentials: "include", signal: controller.signal });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+    } catch (error) {
+        return { ok: false, status: 0, data: {}, error };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function getConnectivitySnapshot() {
+    if (!navigator.onLine) {
+        return { offline: true, serverReachable: false, dbWritable: false };
+    }
+    const ping = await fetchJsonWithTimeout("/api/ping", 3500);
+    if (!ping.ok || !ping.data?.ok) {
+        return { offline: false, serverReachable: false, dbWritable: false };
+    }
+    const health = await fetchJsonWithTimeout("/api/health", 4500);
+    return {
+        offline: false,
+        serverReachable: true,
+        dbWritable: !!(health.ok && health.data?.ok),
+    };
+}
 
 function showAlert(element, message, type = "danger") {
     if (!element) {
@@ -595,7 +1027,8 @@ function initLoginPage() {
     // ── проверка соединения ──
     async function updateConnectionStatus() {
         if (!connBadge) return;
-        if (!navigator.onLine) {
+        const status = await getConnectivitySnapshot();
+        if (status.offline) {
             connBadge.textContent = "Оффлайн: нет сети";
             connBadge.className = "badge rounded-pill text-bg-danger";
             return;
@@ -603,14 +1036,16 @@ function initLoginPage() {
         connBadge.textContent = "Проверяем соединение…";
         connBadge.className = "badge rounded-pill text-bg-secondary connection-status";
         connBadge.classList.remove("connection-online", "connection-offline");
-        const { ok, data } = await API.get("/api/ping");
-        if (ok && data?.ok) {
+        if (status.serverReachable && status.dbWritable) {
             connBadge.textContent = "Онлайн: связь с сервером";
             connBadge.className = "badge rounded-pill text-bg-success connection-status connection-online";
             connBadge.classList.add("badge-pulse-once");
             setTimeout(() => connBadge.classList.remove("badge-pulse-once"), 1300);
+        } else if (status.serverReachable) {
+            connBadge.textContent = "Сервер доступен, БД недоступна";
+            connBadge.className = "badge rounded-pill text-bg-warning connection-status connection-offline";
         } else {
-            connBadge.textContent = data?.error || "Проблемы соединения";
+            connBadge.textContent = "Проблемы соединения";
             connBadge.className = "badge rounded-pill text-bg-warning connection-status connection-offline";
         }
     }
@@ -802,6 +1237,10 @@ function initWorkPage() {
     let syncSelectedGroupCodes = new Set();
     let syncSelectedFloors = new Set();
     let syncBlockToGroupMap = new Map();
+    let syncBlocksCache = { at: 0, blocks: [] };
+    const syncFloorsCache = new Map();
+    let syncFloorsRequestSeq = 0;
+    let syncBlocksLoadingPromise = null;
 
     function blockDisplayName(blockCode) {
         const code = String(blockCode || "").toUpperCase();
@@ -900,6 +1339,7 @@ function initWorkPage() {
 
     async function loadSyncFloorsForSelectedBlocks() {
         if (!syncCatalogFloorsList) return;
+        const reqSeq = ++syncFloorsRequestSeq;
         const pickedBlocks = getSelectedSourceBlocks();
         if (!pickedBlocks.length) {
             syncAvailableFloors = [];
@@ -908,17 +1348,29 @@ function initWorkPage() {
             return;
         }
         syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Загрузка этажей…</div>';
-        const params = new URLSearchParams();
-        params.set("blocks", pickedBlocks.join(","));
-        const floorsRes = await API.get(`/api/sync/floors?${params.toString()}`);
-        if (!floorsRes.ok || !floorsRes.data?.success || !Array.isArray(floorsRes.data.floors)) {
-            syncAvailableFloors = [];
-            syncSelectedFloors = new Set();
-            syncCatalogFloorsList.innerHTML = '<div class="text-danger small">Не удалось загрузить этажи</div>';
-            showToastMessage(floorsRes.data?.error || "Не удалось загрузить этажи", "danger");
-            return;
+        const cacheKey = pickedBlocks.slice().sort().join("|");
+        const cached = syncFloorsCache.get(cacheKey);
+        const now = Date.now();
+        let floorsList = null;
+        if (cached && now - cached.at < SYNC_META_CACHE_TTL_MS) {
+            floorsList = cached.floors;
+        } else {
+            const params = new URLSearchParams();
+            params.set("blocks", pickedBlocks.join(","));
+            const floorsRes = await API.get(`/api/sync/floors?${params.toString()}`);
+            if (reqSeq !== syncFloorsRequestSeq) return;
+            if (!floorsRes.ok || !floorsRes.data?.success || !Array.isArray(floorsRes.data.floors)) {
+                syncAvailableFloors = [];
+                syncSelectedFloors = new Set();
+                syncCatalogFloorsList.innerHTML = '<div class="text-danger small">Не удалось загрузить этажи</div>';
+                showToastMessage(floorsRes.data?.error || "Не удалось загрузить этажи", "danger");
+                return;
+            }
+            floorsList = floorsRes.data.floors;
+            syncFloorsCache.set(cacheKey, { at: now, floors: floorsList });
         }
-        syncAvailableFloors = floorsRes.data.floors
+        if (reqSeq !== syncFloorsRequestSeq) return;
+        syncAvailableFloors = floorsList
             .map((x) => String(x || "").trim().toUpperCase())
             .filter(Boolean);
         const lastFloors = (localStorage.getItem(SYNC_LAST_FLOORS_KEY) || "")
@@ -930,21 +1382,8 @@ function initWorkPage() {
         renderSyncFloorsSelector();
     }
 
-    async function openSyncCatalogModal() {
-        if (!syncCatalogBlocksList) return;
-        syncCatalogBlocksList.innerHTML = '<div class="text-muted small">Загрузка блоков…</div>';
-        if (syncCatalogFloorsList) {
-            syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Сначала выберите блок</div>';
-        }
-        syncAvailableBlocks = [];
-        const blocksRes = await API.get("/api/sync/blocks");
-        if (!blocksRes.ok || !blocksRes.data?.success || !Array.isArray(blocksRes.data.blocks)) {
-            showToastMessage(blocksRes.data?.error || "Не удалось загрузить блоки", "danger");
-            syncCatalogBlocksList.innerHTML = '<div class="text-danger small">Не удалось загрузить блоки</div>';
-            if (syncCatalogModal) syncCatalogModal.show();
-            return;
-        }
-        syncAvailableBlocks = blocksRes.data.blocks.map((b) => String(b || "").toUpperCase()).filter(Boolean);
+    function applySyncBlocksList(blocksList) {
+        syncAvailableBlocks = (blocksList || []).map((b) => String(b || "").toUpperCase()).filter(Boolean);
         syncBlockGroups = buildSyncBlockGroups(syncAvailableBlocks);
         const lastBlocks = (localStorage.getItem(SYNC_LAST_BLOCKS_KEY) || "")
             .split(",")
@@ -956,8 +1395,67 @@ function initWorkPage() {
             : syncBlockGroups.slice(0, 2).map((g) => g.groupCode);
         syncSelectedGroupCodes = new Set(initialGroups);
         renderSyncBlocksSelector();
-        await loadSyncFloorsForSelectedBlocks();
+        void loadSyncFloorsForSelectedBlocks();
+    }
+
+    async function fetchSyncBlocks(forceRefresh = false) {
+        const now = Date.now();
+        if (!forceRefresh && syncBlocksCache.blocks.length && now - syncBlocksCache.at < SYNC_META_CACHE_TTL_MS) {
+            return syncBlocksCache.blocks;
+        }
+        if (syncBlocksLoadingPromise) return syncBlocksLoadingPromise;
+        syncBlocksLoadingPromise = (async () => {
+            const blocksRes = await API.get("/api/sync/blocks");
+            if (!blocksRes.ok || !blocksRes.data?.success || !Array.isArray(blocksRes.data.blocks)) {
+                throw new Error(blocksRes.data?.error || "Не удалось загрузить блоки");
+            }
+            const fresh = blocksRes.data.blocks;
+            syncBlocksCache = { at: Date.now(), blocks: fresh };
+            return fresh;
+        })();
+        try {
+            return await syncBlocksLoadingPromise;
+        } finally {
+            syncBlocksLoadingPromise = null;
+        }
+    }
+
+    async function openSyncCatalogModal() {
+        if (!syncCatalogBlocksList) return;
         if (syncCatalogModal) syncCatalogModal.show();
+        if (syncCatalogFloorsList) {
+            syncCatalogFloorsList.innerHTML = '<div class="text-muted small">Сначала выберите блок</div>';
+        }
+        if (syncBlocksCache.blocks.length) {
+            applySyncBlocksList(syncBlocksCache.blocks);
+        } else {
+            syncCatalogBlocksList.innerHTML = '<div class="text-muted small">Загрузка блоков…</div>';
+        }
+        try {
+            const blocks = await fetchSyncBlocks(false);
+            applySyncBlocksList(blocks);
+        } catch (e) {
+            if (!syncBlocksCache.blocks.length) {
+                syncCatalogBlocksList.innerHTML = '<div class="text-danger small">Не удалось загрузить блоки</div>';
+            }
+            showToastMessage(e?.message || "Не удалось загрузить блоки", "danger");
+            return;
+        }
+        // Stale-while-revalidate: если кэш старый — обновляем в фоне, не блокируя UI.
+        if (Date.now() - syncBlocksCache.at > SYNC_META_CACHE_TTL_MS && navigator.onLine) {
+            fetchSyncBlocks(true)
+                .then((freshBlocks) => applySyncBlocksList(freshBlocks))
+                .catch(() => {});
+        }
+    }
+
+    function preloadSyncCatalogMeta() {
+        if (!navigator.onLine) return;
+        fetchSyncBlocks(false)
+            .then((blocks) => {
+                if (!syncBlocksCache.blocks.length) applySyncBlocksList(blocks);
+            })
+            .catch(() => {});
     }
 
     function setCatalogSyncStatus(text, type = "success") {
@@ -966,6 +1464,21 @@ function initWorkPage() {
         catalogSyncStatus.classList.remove("d-none", "text-bg-success", "text-bg-warning", "text-bg-danger", "text-bg-secondary");
         catalogSyncStatus.classList.add(`text-bg-${type}`);
     }
+    function updateOfflineReadinessStatus() {
+        const cacheSize = PlaceCache.size();
+        const hasCache = cacheSize > 0;
+        if (lastSyncLabel) {
+            const lastAt = localStorage.getItem(SYNC_LAST_AT_KEY);
+            if (lastAt) lastSyncLabel.textContent = `Синхронизация: ${formatDate(lastAt)} (${cacheSize})`;
+            else lastSyncLabel.textContent = hasCache ? `Локальный кэш: ${cacheSize} МХ` : "Локальный кэш: пуст";
+        }
+        if (!catalogSyncStatus) return;
+        if (hasCache) {
+            setCatalogSyncStatus("Офлайн-режим готов (кэш загружен)", "success");
+        } else {
+            setCatalogSyncStatus("Офлайн ограничен: сначала синхронизируйте справочник", "warning");
+        }
+    }
     try {
         const lastAt = localStorage.getItem(SYNC_LAST_AT_KEY);
         if (lastAt && lastSyncLabel) {
@@ -973,6 +1486,7 @@ function initWorkPage() {
             setCatalogSyncStatus("Справочник синхронизирован", "success");
         }
     } catch (_) {}
+    updateOfflineReadinessStatus();
 
     let placeSyncInProgress = false;
 
@@ -1003,7 +1517,7 @@ function initWorkPage() {
                 const raw = localStorage.getItem(cursorKey);
                 if (raw && /^\d+$/.test(raw)) since = Number(raw);
             }
-            let limit = 2000;
+            let limit = 5000;
             let rateLimitRetries = 0;
             if (normalizedBlocks.length) {
                 const floorSuffix = normalizedFloors.length ? `, этаж ${normalizedFloors.join(", ")}` : "";
@@ -1060,6 +1574,7 @@ function initWorkPage() {
             localStorage.setItem(SYNC_LAST_AT_KEY, new Date().toISOString());
             localStorage.setItem(SYNC_LAST_BLOCKS_KEY, normalizedBlocks.join(","));
             localStorage.setItem(SYNC_LAST_FLOORS_KEY, normalizedFloors.join(","));
+            PlaceCache.flush();
             if (lastSyncLabel) {
                 const scopeParts = [];
                 if (normalizedBlocks.length) scopeParts.push(normalizedBlocks.join(", "));
@@ -1069,6 +1584,7 @@ function initWorkPage() {
             }
             if (!hadSyncError) {
                 setCatalogSyncStatus("Справочник синхронизирован", "success");
+                updateOfflineReadinessStatus();
                 if (!silent) {
                     if (totalLoaded > 0) {
                         const suffixParts = [];
@@ -1090,6 +1606,7 @@ function initWorkPage() {
     function updateOfflineQueueUI() {
         const queue = OfflineQueue.getAll();
         const n = queue.length;
+        const conflicts = queue.filter((item) => item.status === "conflict").length;
         if (offlineQueueBar && offlineQueueCount) {
             if (n === 0) {
                 offlineQueueBar.classList.add("d-none");
@@ -1103,7 +1620,11 @@ function initWorkPage() {
                 offlineQueueSyncBtn.title = online ? "Отправить неотправленные сканы на сервер" : "Нет сети — подключитесь к интернету";
             }
             if (offlineQueueHint) {
-                offlineQueueHint.textContent = online ? "Нажмите «Синхронизировать», чтобы отправить." : "При появлении сети нажмите «Синхронизировать».";
+                if (conflicts > 0) {
+                    offlineQueueHint.textContent = `Есть конфликтные сканы: ${conflicts}. Требуется ручная проверка данных.`;
+                } else {
+                    offlineQueueHint.textContent = online ? "Нажмите «Синхронизировать», чтобы отправить." : "При появлении сети отправка начнётся автоматически.";
+                }
             }
         }
         const headerIndicator = document.getElementById("headerOfflineQueueIndicator");
@@ -1114,7 +1635,8 @@ function initWorkPage() {
             } else {
                 headerIndicator.classList.remove("d-none");
                 headerCount.textContent = n;
-                headerIndicator.title = n === 1 ? "1 скан в очереди на отправку" : `${n} сканов в очереди на отправку`;
+                const titleBase = n === 1 ? "1 скан в очереди на отправку" : `${n} сканов в очереди на отправку`;
+                headerIndicator.title = conflicts > 0 ? `${titleBase}; конфликтов: ${conflicts}` : titleBase;
             }
         }
     }
@@ -1173,15 +1695,18 @@ function initWorkPage() {
     async function updateOnlineStatus() {
         updateOfflineQueueUI();
         if (!onlineBadge) return;
-        if (!navigator.onLine) {
+        const status = await getConnectivitySnapshot();
+        if (status.offline) {
             onlineBadge.textContent = "Офлайн";
             onlineBadge.className = "badge bg-danger rounded-pill mt-2";
             return;
         }
-        const { ok, data } = await API.get("/api/ping");
-        if (ok && data?.ok) {
+        if (status.serverReachable && status.dbWritable) {
             onlineBadge.textContent = "Онлайн";
             onlineBadge.className = "badge bg-success rounded-pill mt-2";
+        } else if (status.serverReachable) {
+            onlineBadge.textContent = "Сервер без БД";
+            onlineBadge.className = "badge bg-warning rounded-pill mt-2";
         } else {
             onlineBadge.textContent = "Нет связи";
             onlineBadge.className = "badge bg-warning rounded-pill mt-2";
@@ -1285,6 +1810,12 @@ function initWorkPage() {
         recentScans: [],
         allowDuplicateForCurrentPlace: false,
     };
+    const PLACE_LOOKUP_RETRY_COOLDOWN_MS = 7000;
+    const DB_UNAVAILABLE_COOLDOWN_MS = 15000;
+    const placeLookupInFlight = new Map();
+    const placeLookupCooldownUntil = new Map();
+    let dbUnavailableUntilTs = 0;
+    let saveInFlight = false;
     let qrScanner = null;
     let qrModalInstance = null;
     let qrVideoTrack = null;
@@ -1727,11 +2258,52 @@ function initWorkPage() {
             showAlert(placeAlert, "Введите код МХ");
             return;
         }
+        const normalizedInput = normalizePlaceCode(String(placeCod));
+        const lookupKey = normalizePlaceKey(normalizedInput || placeCod);
+        const nowTs = Date.now();
+        if (lookupKey) {
+            const inFlight = placeLookupInFlight.get(lookupKey);
+            if (inFlight) return inFlight;
+            const blockedUntil = placeLookupCooldownUntil.get(lookupKey) || 0;
+            if (blockedUntil > nowTs) {
+                const cached = await PlaceCache.lookupAsync(placeCod);
+                if (cached) {
+                    const duplicateState = resolveDuplicateOnLoad(placeCod, cached);
+                    if (duplicateState === "cancel") return;
+                    applyPlaceData(cached, placeCod, true);
+                    showAlert(placeAlert, "Сервер недоступен. Загружено из локального кэша.", "warning");
+                    return;
+                }
+                const waitSec = Math.max(1, Math.ceil((blockedUntil - nowTs) / 1000));
+                const msg = `Сервер БД недоступен. Повторите через ${waitSec} с или используйте МХ из локального кэша.`;
+                showAlert(placeAlert, msg, "warning");
+                logEvent(msg, "warning");
+                placeInput.classList.add("is-invalid");
+                return;
+            }
+        }
+        if (Date.now() < dbUnavailableUntilTs) {
+            const cached = await PlaceCache.lookupAsync(placeCod);
+            if (cached) {
+                const duplicateState = resolveDuplicateOnLoad(placeCod, cached);
+                if (duplicateState === "cancel") return;
+                applyPlaceData(cached, placeCod, true);
+                showAlert(placeAlert, "БД временно недоступна. Загружено из локального кэша.", "warning");
+                return;
+            }
+            const waitSec = Math.max(1, Math.ceil((dbUnavailableUntilTs - Date.now()) / 1000));
+            const msg = `БД недоступна. Повторите через ${waitSec} с или используйте предварительно синхронизированный МХ.`;
+            showAlert(placeAlert, msg, "warning");
+            logEvent(msg, "warning");
+            placeInput.classList.add("is-invalid");
+            return;
+        }
+
         placeForm?.classList.add("was-validated");
         placeInput.classList.remove("is-valid", "is-invalid");
 
         if (!options.skipCache) {
-            const cached = PlaceCache.get(placeCod);
+            const cached = await PlaceCache.lookupAsync(placeCod);
             if (cached) {
                 const duplicateState = resolveDuplicateOnLoad(placeCod, cached);
                 if (duplicateState === "cancel") return;
@@ -1743,32 +2315,63 @@ function initWorkPage() {
             }
         }
         if (!navigator.onLine) {
-            const msg = "Офлайн: МХ не найден в локальном кэше. Перед работой без сети выполните синхронизацию справочника.";
+            const cacheSize = PlaceCache.size();
+            const msg = cacheSize > 0
+                ? "Офлайн: МХ не найден в локальном кэше. Проверьте код или обновите справочник при появлении сети."
+                : "Офлайн: кэш пуст. Перед работой без сети выполните синхронизацию справочника.";
             showAlert(placeAlert, msg, "warning");
             logEvent(msg, "warning");
             placeInput.classList.add("is-invalid");
             return;
         }
 
-        const placeCard = document.getElementById("placeCard");
-        if (placeCard) placeCard.classList.add("is-loading");
-        const { ok, data } = await API.get(`/api/place/${encodeURIComponent(placeCod)}`);
-        if (placeCard) placeCard.classList.remove("is-loading");
-        if (!ok || data.error) {
-            const errorMessage = data.error || "Место не найдено";
-            showAlert(placeAlert, errorMessage);
-            logEvent(errorMessage, "danger");
-            placeInput.classList.add("is-invalid");
-            SoundFeedback.playError();
+        const runLookup = async () => {
+            const placeCard = document.getElementById("placeCard");
+            if (placeCard) placeCard.classList.add("is-loading");
+            const { ok, status, data } = await API.get(`/api/place/${encodeURIComponent(placeCod)}`);
+            if (placeCard) placeCard.classList.remove("is-loading");
+            if (!ok || data.error) {
+                const canUseCacheFallback = status === 503 || status === 0 || String(data?.error || "").toLowerCase().includes("нет связи с бд");
+                if (canUseCacheFallback) {
+                    dbUnavailableUntilTs = Date.now() + DB_UNAVAILABLE_COOLDOWN_MS;
+                    if (lookupKey) placeLookupCooldownUntil.set(lookupKey, Date.now() + PLACE_LOOKUP_RETRY_COOLDOWN_MS);
+                    const cached = await PlaceCache.lookupAsync(placeCod);
+                    if (cached) {
+                        const duplicateState = resolveDuplicateOnLoad(placeCod, cached);
+                        if (duplicateState === "cancel") return;
+                        applyPlaceData(cached, placeCod, true);
+                        showAlert(placeAlert, "БД недоступна. Загружено из локального кэша.", "warning");
+                        logEvent("Справочник БД недоступен, использован локальный кэш", "warning");
+                        return;
+                    }
+                } else if (lookupKey) {
+                    placeLookupCooldownUntil.delete(lookupKey);
+                }
+                const errorMessage = data.error || "Место не найдено";
+                showAlert(placeAlert, errorMessage);
+                logEvent(errorMessage, "danger");
+                placeInput.classList.add("is-invalid");
+                SoundFeedback.playError();
+                return;
+            }
+            dbUnavailableUntilTs = 0;
+            if (lookupKey) placeLookupCooldownUntil.delete(lookupKey);
+            const duplicateState = resolveDuplicateOnLoad(placeCod, data);
+            if (duplicateState === "cancel") return;
+            PlaceCache.set(placeCod, data);
+            applyPlaceData(data, placeCod, false);
+            if (state.allowDuplicateForCurrentPlace) {
+                showAlert(placeAlert, "Повторный скан подтвержден (задвойка)", "warning");
+            }
+        };
+
+        if (!lookupKey) {
+            await runLookup();
             return;
         }
-        const duplicateState = resolveDuplicateOnLoad(placeCod, data);
-        if (duplicateState === "cancel") return;
-        PlaceCache.set(placeCod, data);
-        applyPlaceData(data, placeCod, false);
-        if (state.allowDuplicateForCurrentPlace) {
-            showAlert(placeAlert, "Повторный скан подтвержден (задвойка)", "warning");
-        }
+        const task = runLookup().finally(() => placeLookupInFlight.delete(lookupKey));
+        placeLookupInFlight.set(lookupKey, task);
+        return task;
     }
 
     function clearPlaceCard() {
@@ -1963,6 +2566,7 @@ function initWorkPage() {
     }
 
     async function saveScan() {
+        if (saveInFlight) return;
         if (!state.lastMxCode) {
             showAlert(placeAlert, "Сначала отсканируйте МХ");
             logEvent("Попытка сохранения без выбранного МХ", "warning");
@@ -2043,22 +2647,28 @@ function initWorkPage() {
             photo: state.photos[0] || state.photoData,
             photos: state.photos,
         };
-
+        saveInFlight = true;
+        const scanOnlyBtns = document.querySelectorAll(".scan-only-btn");
         saveSpinner?.classList.remove("d-none");
         saveScanBtn?.setAttribute("disabled", "disabled");
-        const scanOnlyBtns = document.querySelectorAll(".scan-only-btn");
         scanOnlyBtns.forEach((b) => b?.setAttribute("disabled", "disabled"));
-        const firstTry = await API.post("/api/scan/complete", payload);
-        let ok = firstTry.ok;
-        let data = firstTry.data || {};
-        saveSpinner?.classList.add("d-none");
-        saveScanBtn?.removeAttribute("disabled");
-        scanOnlyBtns.forEach((b) => b?.removeAttribute("disabled"));
+        let ok = false;
+        let data = {};
+        try {
+            const firstTry = await API.post("/api/scan/complete", payload);
+            ok = firstTry.ok;
+            data = firstTry.data || {};
+        } finally {
+            saveSpinner?.classList.add("d-none");
+            saveScanBtn?.removeAttribute("disabled");
+            scanOnlyBtns.forEach((b) => b?.removeAttribute("disabled"));
+            saveInFlight = false;
+        }
 
         if (!ok || data.error || !data.success) {
             const errorMessage = data.error || "Не удалось сохранить результат";
             const isDuplicateInShift = data.code === "duplicate_in_shift" || (data.error && data.error.includes("уже отсканирован в текущей смене"));
-            const isQueued = data.error && data.error.includes("очередь");
+            const isQueued = !!data.queued || (data.error && data.error.includes("очередь"));
             if (isDuplicateInShift) {
                 const confirmDuplicate = window.confirm(
                     "Такая ячейка уже сканировалась в текущей смене.\nЭто задвойка?"
@@ -2096,7 +2706,7 @@ function initWorkPage() {
 
         if (!ok || data.error || !data.success) {
             const errorMessage = data.error || "Не удалось сохранить результат";
-            const isQueued = data.error && data.error.includes("очередь");
+            const isQueued = !!data.queued || (data.error && data.error.includes("очередь"));
             const isDuplicateInShift = data.code === "duplicate_in_shift" || (data.error && data.error.includes("уже отсканирован в текущей смене"));
             showAlert(placeAlert, errorMessage, isDuplicateInShift || isQueued ? "info" : "danger");
             logEvent(errorMessage, isQueued ? "info" : "danger");
@@ -2505,7 +3115,7 @@ function initWorkPage() {
         if (syncSelectedGroupCodes.has(groupCode)) syncSelectedGroupCodes.delete(groupCode);
         else syncSelectedGroupCodes.add(groupCode);
         renderSyncBlocksSelector();
-        await loadSyncFloorsForSelectedBlocks();
+        void loadSyncFloorsForSelectedBlocks();
     });
     syncCatalogFloorsList?.addEventListener("click", (event) => {
         const btn = event.target.closest("[data-sync-floor]");
@@ -2849,6 +3459,7 @@ function initWorkPage() {
     renderMiniRecentScans();
     setInterval(updateLastScanAgoChip, 30000);
     focusPlaceInput();
+    setTimeout(preloadSyncCatalogMeta, 700);
 
     offlineQueueSyncBtn?.addEventListener("click", async () => {
         if (!navigator.onLine) {
@@ -2857,10 +3468,12 @@ function initWorkPage() {
         }
         offlineQueueSyncBtn.disabled = true;
         try {
-            await syncOfflineQueue();
+            const result = await syncOfflineQueue();
             updateOfflineQueueUI();
-            const left = OfflineQueue.getAll().length;
+            const left = result?.left ?? OfflineQueue.getAll().length;
+            const conflicts = result?.conflicts ?? OfflineQueue.getAll().filter((x) => x.status === "conflict").length;
             if (left === 0) showToastMessage("Очередь синхронизирована", "success");
+            else if (conflicts > 0) showToastMessage(`В очереди осталось: ${left}. Конфликтов: ${conflicts}.`, "warning");
             else showToastMessage(`Отправлено. В очереди осталось: ${left}`, "info");
         } finally {
             offlineQueueSyncBtn.disabled = false;
@@ -2870,16 +3483,28 @@ function initWorkPage() {
 
     window.addEventListener("online", async () => {
         updateOnlineStatus();
-        const sent = await syncOfflineQueue();
+        const result = await syncOfflineQueue();
         updateOfflineQueueUI();
+        const sent = result?.sent || 0;
+        const conflicts = result?.conflicts || 0;
         if (sent > 0) {
             const msg = sent === 1 ? "Сеть появилась. Отправлен 1 скан." : `Сеть появилась. Отправлено ${sent} сканов.`;
             showToastMessage(msg, "success");
+        } else if (conflicts > 0) {
+            showToastMessage(`Сеть появилась, но есть конфликтные записи: ${conflicts}`, "warning");
         } else if (OfflineQueue.getAll().length === 0) {
             showToastMessage("Очередь синхронизирована", "success");
         }
     });
     window.addEventListener("offline", updateOnlineStatus);
+    window.setInterval(async () => {
+        if (!navigator.onLine) return;
+        if (document.hidden) return;
+        if (!OfflineQueue.getAll().length) return;
+        const result = await syncOfflineQueue();
+        updateOfflineQueueUI();
+        if ((result?.sent || 0) > 0) updateOnlineStatus();
+    }, OFFLINE_AUTO_SYNC_INTERVAL_MS);
 }
 
 function initAdminLoginPage() {

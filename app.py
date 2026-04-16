@@ -10,6 +10,7 @@ import os
 import random
 import re
 import sys
+import time
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -63,6 +64,7 @@ DB_CONFIG = _DBConfig()
 
 # Глобальное подключение к БД (синхронное). На Vercel не используется — соединение на каждый запрос.
 db_connection = None
+_db_connection_last_check_ts = 0.0
 IS_VERCEL = os.environ.get("VERCEL") == "1"
 
 # Небольшой in-memory кэш для тяжёлых админских агрегатов (снижает нагрузку при частых refresh).
@@ -75,16 +77,29 @@ _rate_limit_store = {}
 
 # Флаг однократной инициализации схемы БД
 _db_initialized = False
+_db_init_retry_after_ts = 0.0
+_db_init_backoff_seconds = int(os.environ.get("DB_INIT_RETRY_SECONDS", "45"))
 
 
 @app.before_request
 def _init_db_once():
     """Создаёт таблицы и индексы один раз на весь процесс (или один раз на каждый cold-start на Vercel)."""
-    global _db_initialized
+    global _db_initialized, _db_init_retry_after_ts
     if _db_initialized:
         return
-    _db_initialized = True
-    ensure_tasks_table()
+    now = time.time()
+    if now < _db_init_retry_after_ts:
+        return
+    try:
+        ensure_tasks_table()
+        _db_initialized = True
+    except Exception as exc:
+        _db_init_retry_after_ts = now + max(5, _db_init_backoff_seconds)
+        logger.warning(
+            "Пропускаем init схемы БД до восстановления соединения: %s (повтор через %ss)",
+            exc,
+            int(max(5, _db_init_backoff_seconds)),
+        )
 
 
 @app.route('/static/manifest.json')
@@ -153,9 +168,25 @@ def get_db():
                 connect_kw["sslmode"] = sslmode
             g.db_conn = psycopg2.connect(**connect_kw)
         return g.db_conn
-    global db_connection
+    global db_connection, _db_connection_last_check_ts
+    check_interval = float(os.environ.get("DB_HEALTHCHECK_INTERVAL_SECONDS", "3"))
+    now = time.time()
+    if db_connection is not None and not db_connection.closed and (now - _db_connection_last_check_ts) >= max(1.0, check_interval):
+        try:
+            with db_connection.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            _db_connection_last_check_ts = now
+        except psycopg2.Error as exc:
+            logger.warning("Потеряно соединение с БД, переподключаемся: %s", exc)
+            try:
+                db_connection.close()
+            except Exception:
+                pass
+            db_connection = None
     if db_connection is None or db_connection.closed:
         stmt_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
+        connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "8"))
         db_connection = psycopg2.connect(
             host=DB_CONFIG.host,
             port=DB_CONFIG.port,
@@ -163,9 +194,11 @@ def get_db():
             user=DB_CONFIG.user,
             password=DB_CONFIG.password,
             cursor_factory=RealDictCursor,
+            connect_timeout=connect_timeout,
             # Те же ограничения и для локального режима.
             options=f"-c statement_timeout={stmt_timeout_ms}",
         )
+        _db_connection_last_check_ts = now
         logger.info("Подключение к БД установлено")
     return db_connection
 
@@ -188,6 +221,11 @@ def ensure_tasks_table():
     try:
         conn = get_db()
         with conn.cursor() as cur:
+            # Инициализация схемы не должна блокировать рабочие API-запросы надолго.
+            init_stmt_timeout_ms = int(os.environ.get("DB_INIT_STATEMENT_TIMEOUT_MS", "5000"))
+            init_lock_timeout_ms = int(os.environ.get("DB_INIT_LOCK_TIMEOUT_MS", "1500"))
+            cur.execute(f"SET LOCAL statement_timeout = {max(1000, init_stmt_timeout_ms)}")
+            cur.execute(f"SET LOCAL lock_timeout = {max(500, init_lock_timeout_ms)}")
             # Таблица активных заданий
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS active_tasks (
@@ -862,6 +900,9 @@ def get_user_history():
             )
 
         return jsonify({"success": True, "badge": badge, "history": history})
+    except psycopg2.Error as e:
+        logger.exception("База данных недоступна при получении истории сканов")
+        return jsonify({"error": "История временно недоступна (нет связи с БД). Оффлайн-очередь продолжит работать."}), 503
     except Exception as e:
         logger.exception("Ошибка получения истории сканов пользователя")
         return jsonify({"error": str(e)}), 500
@@ -1986,6 +2027,10 @@ def get_task_suggestions():
             'suggestions': suggestions,
             'badge': badge,
         })
+    except psycopg2.Error as e:
+        logger.exception("База данных недоступна при генерации рекомендаций")
+        safe_rollback(conn)
+        return jsonify({'error': 'Маршрутные подсказки временно недоступны (нет связи с БД).'}), 503
     except Exception as e:
         logger.exception("Ошибка генерации рекомендаций")
         safe_rollback(conn)
@@ -2041,7 +2086,15 @@ def sync_data():
         conn = get_db()
         with conn.cursor() as cur:
             query = """
-                SELECT mx_id as place_cod, mx_code as place_name, 0 as qty_shk
+                SELECT
+                    mx_id AS place_cod,
+                    mx_code AS place_name,
+                    0 AS qty_shk,
+                    floor,
+                    row_num,
+                    section,
+                    mx_status,
+                    updated_at
                 FROM warehouse_places
                 WHERE 1=1
             """

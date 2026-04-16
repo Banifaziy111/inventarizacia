@@ -8,6 +8,7 @@ import logging
 import re
 
 from flask import jsonify
+import psycopg2
 
 from core.db import ensure_warehouse_places_mx_status
 
@@ -120,6 +121,9 @@ def get_place_handler(place_cod, get_db_fn):
                 }
             )
 
+    except psycopg2.Error:
+        logger.exception("База данных недоступна при получении МХ")
+        return jsonify({"error": "Справочник временно недоступен (нет связи с БД). Используйте локальный кэш или повторите позже."}), 503
     except Exception:
         logger.exception("Ошибка при получении данных о месте")
         return jsonify({"error": "Внутренняя ошибка сервера"}), 500

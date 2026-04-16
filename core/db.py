@@ -25,6 +25,7 @@ def ensure_shift_start_table(conn):
                 )
             """)
     except Exception as e:
+        safe_rollback(conn)
         logger.warning("Не удалось создать shift_start: %s", e)
 
 
@@ -39,5 +40,6 @@ def ensure_warehouse_places_mx_status(conn):
                 ADD COLUMN IF NOT EXISTS mx_status VARCHAR(150)
             """)
     except Exception as e:
+        safe_rollback(conn)
         logger.warning("Не удалось добавить mx_status: %s", e)
 
