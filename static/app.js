@@ -1178,6 +1178,9 @@ function initWorkPage() {
     const otherReasonInput = document.getElementById("otherReasonInput");
     const photoDropzone = document.getElementById("photoDropzone");
     const photoInput = document.getElementById("photoInput");
+    if (photoInput && typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent || "")) {
+        photoInput.setAttribute("capture", "environment");
+    }
     const photoSelectBtn = document.getElementById("photoSelectBtn");
     const photoPreview = document.getElementById("photoPreview");
     const photoHint = document.getElementById("photoHint");
@@ -2863,6 +2866,13 @@ function initWorkPage() {
         return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     }
 
+    /** Снижаем разрешение потока на телефонах — иначе Android часто даёт 4K и декод QR лагает. */
+    function isMobileCameraProfile() {
+        if (typeof navigator === "undefined") return false;
+        const ua = navigator.userAgent || "";
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    }
+
     function getQrVideoTrack() {
         const root = document.getElementById("qrReaderLive") || qrReaderEl;
         if (!root) return null;
@@ -2872,10 +2882,19 @@ function initWorkPage() {
         return tracks.length ? tracks[0] : null;
     }
 
-    function setTorch(on) {
+    async function setTorch(on) {
         if (!qrVideoTrack) return;
         qrTorchOn = on;
-        qrVideoTrack.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {});
+        const track = qrVideoTrack;
+        try {
+            await track.applyConstraints({ torch: on });
+        } catch {
+            try {
+                await track.applyConstraints({ advanced: [{ torch: on }] });
+            } catch {
+                /* устройство/браузер не поддерживает torch */
+            }
+        }
         if (qrTorchIcon) qrTorchIcon.className = on ? "bi bi-flashlight-fill" : "bi bi-flashlight";
         if (qrTorchLabel) qrTorchLabel.textContent = on ? "Выкл. фонарик" : "Фонарик";
         if (qrTorchBtn) qrTorchBtn.title = on ? "Выключить фонарик" : "Включить фонарик";
@@ -2889,7 +2908,11 @@ function initWorkPage() {
 
     async function stopQrScanner() {
         if (qrVideoTrack && qrTorchOn) {
-            try { setTorch(false); } catch (e) {}
+            try {
+                await setTorch(false);
+            } catch (e) {
+                /* noop */
+            }
             qrVideoTrack = null;
             qrTorchOn = false;
         }
@@ -2994,7 +3017,12 @@ function initWorkPage() {
         const closeBtn = () => closeQrOverlay();
         overlay.querySelectorAll(".qr-custom-overlay__close").forEach((btn) => btn.addEventListener("click", closeBtn));
         overlay.addEventListener("click", (e) => { if (e.target === overlay) closeBtn(); });
-        if (qrOverlayTorchBtn) qrOverlayTorchBtn.addEventListener("click", () => { if (!qrVideoTrack) return; setTorch(!qrTorchOn); });
+        if (qrOverlayTorchBtn) {
+            qrOverlayTorchBtn.addEventListener("click", () => {
+                if (!qrVideoTrack) return;
+                void setTorch(!qrTorchOn);
+            });
+        }
 
         updateQrStatus("Инициализация камеры...", "warning");
 
@@ -3027,8 +3055,27 @@ function initWorkPage() {
                 }) || cameras[0];
 
             const readerLive = document.getElementById("qrReaderLive");
-            const qrbox = Math.min((readerLive?.offsetWidth) || 280, 320);
-            const scanConfig = { fps: 10, qrbox };
+            await new Promise((resolve) => {
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+            });
+            const readerWidth =
+                readerLive?.getBoundingClientRect?.().width || readerLive?.offsetWidth || 280;
+            const qrbox = Math.min(Math.max(Math.round(readerWidth * 0.9), 220), 360);
+
+            const mobileCam = isMobileCameraProfile();
+            const buildScanConfig = (withMobileVideoLimits) => {
+                const fps = mobileCam ? 12 : 10;
+                const cfg = { fps, qrbox };
+                if (mobileCam && withMobileVideoLimits) {
+                    cfg.videoConstraints = {
+                        width: { max: 1280 },
+                        height: { max: 720 },
+                        frameRate: { ideal: 24, max: 30 },
+                    };
+                }
+                return cfg;
+            };
+
             const onScan = (decodedText) => {
                 if (!decodedText) return;
                 handleQrResult(decodedText);
@@ -3036,7 +3083,29 @@ function initWorkPage() {
             const onError = () => {};
 
             const tryStart = async (cameraConfig) => {
-                await qrScanner.start(cameraConfig, scanConfig, onScan, onError);
+                const scanAttempts = mobileCam
+                    ? [buildScanConfig(true), buildScanConfig(false)]
+                    : [buildScanConfig(false)];
+                let lastErr = null;
+                for (const scanCfg of scanAttempts) {
+                    try {
+                        await qrScanner.start(cameraConfig, scanCfg, onScan, onError);
+                        return;
+                    } catch (e) {
+                        lastErr = e;
+                        try {
+                            await qrScanner.stop();
+                        } catch {
+                            /* noop */
+                        }
+                        try {
+                            qrScanner.clear();
+                        } catch {
+                            /* noop */
+                        }
+                    }
+                }
+                throw lastErr;
             };
 
             // Сначала пробуем тыльную камеру (на Android часто нужна именно она для QR)
@@ -3375,7 +3444,7 @@ function initWorkPage() {
     });
     qrTorchBtn?.addEventListener("click", () => {
         if (!qrVideoTrack) return;
-        setTorch(!qrTorchOn);
+        void setTorch(!qrTorchOn);
     });
 
     placeInput?.addEventListener("paste", (event) => {
