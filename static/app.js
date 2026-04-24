@@ -3063,11 +3063,25 @@ function initWorkPage() {
             const qrbox = Math.min(Math.max(Math.round(readerWidth * 0.9), 220), 360);
 
             const mobileCam = isMobileCameraProfile();
-            const buildScanConfig = (withMobileVideoLimits) => {
+            const cameraConfigToVideoConstraint = (cameraConfig) => {
+                if (!cameraConfig) return {};
+                if (typeof cameraConfig === "string") {
+                    return { deviceId: { exact: cameraConfig } };
+                }
+                if (cameraConfig.deviceId) {
+                    return { deviceId: cameraConfig.deviceId };
+                }
+                if (cameraConfig.facingMode) {
+                    return { facingMode: cameraConfig.facingMode };
+                }
+                return {};
+            };
+            const buildScanConfig = (cameraConfig, withMobileVideoLimits) => {
                 const fps = mobileCam ? 12 : 10;
                 const cfg = { fps, qrbox };
                 if (mobileCam && withMobileVideoLimits) {
                     cfg.videoConstraints = {
+                        ...cameraConfigToVideoConstraint(cameraConfig),
                         width: { max: 1280 },
                         height: { max: 720 },
                         frameRate: { ideal: 24, max: 30 },
@@ -3084,8 +3098,8 @@ function initWorkPage() {
 
             const tryStart = async (cameraConfig) => {
                 const scanAttempts = mobileCam
-                    ? [buildScanConfig(true), buildScanConfig(false)]
-                    : [buildScanConfig(false)];
+                    ? [buildScanConfig(cameraConfig, true), buildScanConfig(cameraConfig, false)]
+                    : [buildScanConfig(cameraConfig, false)];
                 let lastErr = null;
                 for (const scanCfg of scanAttempts) {
                     try {
@@ -3108,17 +3122,26 @@ function initWorkPage() {
                 throw lastErr;
             };
 
-            // Сначала пробуем тыльную камеру (на Android часто нужна именно она для QR)
+            // Сначала пробуем тыльную камеру максимально жёстко.
             let lastError = null;
             const configsToTry = [];
-            if ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices) {
-                configsToTry.push({ facingMode: "environment" });
-            }
+            const addConfigToTry = (config) => {
+                if (!config) return;
+                const key = JSON.stringify(config);
+                if (!configsToTry.some((item) => JSON.stringify(item) === key)) {
+                    configsToTry.push(config);
+                }
+            };
             if (backCamera.id) {
-                configsToTry.push({ deviceId: { exact: backCamera.id } });
+                addConfigToTry({ deviceId: { exact: backCamera.id } });
+                addConfigToTry(backCamera.id);
+            }
+            if ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices) {
+                addConfigToTry({ facingMode: { exact: "environment" } });
+                addConfigToTry({ facingMode: { ideal: "environment" } });
             }
             if (cameras[0] && cameras[0].id) {
-                configsToTry.push(cameras[0].id);
+                addConfigToTry(cameras[0].id);
             }
             for (const config of configsToTry) {
                 try {
