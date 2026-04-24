@@ -44,7 +44,7 @@ def _decode_photos(photos_list, single_photo, place_cod):
     return decoded
 
 
-def complete_scan_handler(get_db_fn):
+def complete_scan_handler(get_db_fn, badge_override=None):
     """
     Основная логика POST /api/scan/complete.
 
@@ -52,7 +52,7 @@ def complete_scan_handler(get_db_fn):
     :returns: Flask Response.
     """
     data = request.get_json() or {}
-    badge = data.get("badge")
+    badge = badge_override if badge_override is not None else data.get("badge")
     place_cod = data.get("place_cod")
     fact_qty = data.get("fact_qty")
     status = data.get("status")

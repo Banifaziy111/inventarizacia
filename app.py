@@ -5,10 +5,13 @@
 """
 
 import asyncio
+import hmac
+import json
 import logging
 import os
 import random
 import re
+import secrets
 import sys
 import time
 
@@ -17,7 +20,7 @@ load_dotenv()
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, g, jsonify, render_template, request, send_file, send_from_directory, redirect
+from flask import Flask, g, jsonify, render_template, request, send_file, send_from_directory, redirect, session
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 if sys.platform == "win32":
@@ -40,13 +43,20 @@ logger = logging.getLogger(__name__)
 # Инициализация Flask
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = (os.environ.get("COOKIE_SECURE") or "").strip().lower() in ("1", "true", "yes", "on")
+
+ADMIN_BADGE = (os.environ.get("ADMIN_BADGE") or "ADMIN").strip()
+ADMIN_PASSWORD = (os.environ.get("ADMIN_PASSWORD") or "").strip()
 
 # Настройка CORS для Safari и других браузеров
 CORS(app, resources={
     r"/*": {
         "origins": "*",
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
+        "allow_headers": ["Content-Type", "X-CSRF-Token"],
         "supports_credentials": True
     }
 })
@@ -62,10 +72,9 @@ class _DBConfig:
 
 DB_CONFIG = _DBConfig()
 
-# Глобальное подключение к БД (синхронное). На Vercel не используется — соединение на каждый запрос.
-db_connection = None
-_db_connection_last_check_ts = 0.0
 IS_VERCEL = os.environ.get("VERCEL") == "1"
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "X-CSRF-Token"
 
 # Небольшой in-memory кэш для тяжёлых админских агрегатов (снижает нагрузку при частых refresh).
 ADMIN_CACHE_TTL_SECONDS = int(os.environ.get("ADMIN_CACHE_TTL_SECONDS", "45"))
@@ -79,6 +88,87 @@ _rate_limit_store = {}
 _db_initialized = False
 _db_init_retry_after_ts = 0.0
 _db_init_backoff_seconds = int(os.environ.get("DB_INIT_RETRY_SECONDS", "45"))
+
+
+def _cookie_secure_flag() -> bool:
+    force_secure = (os.environ.get("COOKIE_SECURE") or "").strip().lower()
+    if force_secure in ("1", "true", "yes", "on"):
+        return True
+    if force_secure in ("0", "false", "no", "off"):
+        return False
+    return bool(request.is_secure or IS_VERCEL)
+
+
+def _set_auth_cookie(response, name: str, value: str, max_age: int = 28800, httponly: bool = True):
+    response.set_cookie(
+        name,
+        value,
+        max_age=max_age,
+        httponly=httponly,
+        secure=_cookie_secure_flag(),
+        samesite="Lax",
+    )
+
+
+def _clear_cookie(response, name: str, httponly: bool = True):
+    response.set_cookie(
+        name,
+        "",
+        max_age=0,
+        httponly=httponly,
+        secure=_cookie_secure_flag(),
+        samesite="Lax",
+    )
+
+
+def _issue_csrf_cookie(response):
+    token = secrets.token_urlsafe(32)
+    _set_auth_cookie(response, CSRF_COOKIE_NAME, token, max_age=28800, httponly=False)
+    return token
+
+
+def _current_session_badge() -> str:
+    badge = session.get("badge")
+    return str(badge).strip() if badge else ""
+
+
+def _is_admin_session() -> bool:
+    return bool(session.get("is_admin") is True and _current_session_badge() == ADMIN_BADGE)
+
+
+def _is_authenticated_session() -> bool:
+    return bool(_current_session_badge())
+
+
+def _current_admin_badge() -> str:
+    return ADMIN_BADGE if _is_admin_session() else ""
+
+
+def _current_employee_badge() -> str:
+    if _is_admin_session():
+        return ""
+    return _current_session_badge()
+
+
+def _resolve_employee_badge_or_401():
+    badge = _current_employee_badge()
+    if not badge:
+        return "", (jsonify({"error": "Требуется авторизация"}), 401)
+    return badge, None
+
+
+def _resolve_badge_for_user_scope(requested_badge: str):
+    requested = (requested_badge or "").strip()
+    user_badge, err = _resolve_employee_badge_or_401()
+    if err:
+        return "", err
+    if requested and requested != user_badge:
+        return "", (jsonify({"error": "Доступ запрещен"}), 403)
+    return user_badge, None
+
+
+def _is_authenticated_for_sync() -> bool:
+    return _is_authenticated_session()
 
 
 @app.before_request
@@ -102,6 +192,34 @@ def _init_db_once():
         )
 
 
+@app.before_request
+def _enforce_csrf_for_state_changing_requests():
+    """Проверка CSRF для mutating-запросов, если пользователь авторизован по cookie."""
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return
+    if request.endpoint in {"auth", "admin_auth"}:
+        return
+    if not _is_authenticated_session():
+        return
+    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME) or ""
+    csrf_header = request.headers.get(CSRF_HEADER_NAME, "") or ""
+    if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+        return jsonify({"error": "CSRF token missing or invalid"}), 403
+
+
+@app.before_request
+def _enforce_admin_session_for_admin_routes():
+    """Единая серверная проверка роли администратора для всех admin-роутов."""
+    path = request.path or ""
+    if path in ("/api/admin/auth", "/api/admin/logout", "/admin", "/admin_login"):
+        return
+    if path.startswith("/api/admin/") or path == "/admin/dashboard":
+        if not _is_admin_session():
+            if path == "/admin/dashboard":
+                return redirect("/admin")
+            return jsonify({"error": "Доступ запрещен"}), 403
+
+
 @app.route('/static/manifest.json')
 def manifest_json():
     """Manifest PWA — без проверки авторизации, чтобы не было 401 при загрузке со страницы."""
@@ -121,6 +239,11 @@ def add_camera_permissions_policy(response):
     """Разрешить камеру в том же origin — иначе на Android Chrome камера может не открываться."""
     if response.headers.get("Permissions-Policy") is None:
         response.headers["Permissions-Policy"] = "camera=(self), microphone=(self)"
+    if response.status_code == 500 and response.mimetype == "application/json":
+        payload = response.get_json(silent=True)
+        if isinstance(payload, dict) and "error" in payload:
+            payload["error"] = "Внутренняя ошибка сервера"
+            response.set_data(json.dumps(payload, ensure_ascii=False))
     return response
 
 
@@ -148,65 +271,30 @@ def health_check():
 
 
 def get_db():
-    """Получить подключение к БД. На Vercel — одно соединение на запрос (хранится в g), после ответа закрывается."""
-    if IS_VERCEL:
-        if getattr(g, "db_conn", None) is None or g.db_conn.closed:
-            stmt_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
-            connect_kw = {
-                "host": DB_CONFIG.host,
-                "port": DB_CONFIG.port,
-                "database": DB_CONFIG.database,
-                "user": DB_CONFIG.user,
-                "password": DB_CONFIG.password,
-                "cursor_factory": RealDictCursor,
-                "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
-                # Ограничиваем длительность тяжёлых запросов, чтобы не ловить 60s runtime timeout.
-                "options": f"-c statement_timeout={stmt_timeout_ms}",
-            }
-            sslmode = os.environ.get("DB_SSLMODE", "").strip().lower()
-            if sslmode:
-                connect_kw["sslmode"] = sslmode
-            g.db_conn = psycopg2.connect(**connect_kw)
-        return g.db_conn
-    global db_connection, _db_connection_last_check_ts
-    check_interval = float(os.environ.get("DB_HEALTHCHECK_INTERVAL_SECONDS", "3"))
-    now = time.time()
-    if db_connection is not None and not db_connection.closed and (now - _db_connection_last_check_ts) >= max(1.0, check_interval):
-        try:
-            with db_connection.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-            _db_connection_last_check_ts = now
-        except psycopg2.Error as exc:
-            logger.warning("Потеряно соединение с БД, переподключаемся: %s", exc)
-            try:
-                db_connection.close()
-            except Exception:
-                pass
-            db_connection = None
-    if db_connection is None or db_connection.closed:
+    """Получить подключение к БД на текущий запрос (из g)."""
+    if getattr(g, "db_conn", None) is None or g.db_conn.closed:
         stmt_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
-        connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "8"))
-        db_connection = psycopg2.connect(
-            host=DB_CONFIG.host,
-            port=DB_CONFIG.port,
-            database=DB_CONFIG.database,
-            user=DB_CONFIG.user,
-            password=DB_CONFIG.password,
-            cursor_factory=RealDictCursor,
-            connect_timeout=connect_timeout,
-            # Те же ограничения и для локального режима.
-            options=f"-c statement_timeout={stmt_timeout_ms}",
-        )
-        _db_connection_last_check_ts = now
-        logger.info("Подключение к БД установлено")
-    return db_connection
+        connect_kw = {
+            "host": DB_CONFIG.host,
+            "port": DB_CONFIG.port,
+            "database": DB_CONFIG.database,
+            "user": DB_CONFIG.user,
+            "password": DB_CONFIG.password,
+            "cursor_factory": RealDictCursor,
+            "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "15" if IS_VERCEL else "8")),
+            "options": f"-c statement_timeout={stmt_timeout_ms}",
+        }
+        sslmode = os.environ.get("DB_SSLMODE", "").strip().lower()
+        if sslmode:
+            connect_kw["sslmode"] = sslmode
+        g.db_conn = psycopg2.connect(**connect_kw)
+    return g.db_conn
 
 
 @app.teardown_appcontext
-def close_db_on_vercel(exception=None):
-    """На Vercel закрываем соединение с БД после каждого запроса."""
-    if IS_VERCEL and getattr(g, "db_conn", None) is not None:
+def close_db_on_request_end(exception=None):
+    """Закрываем соединение с БД после каждого запроса."""
+    if getattr(g, "db_conn", None) is not None:
         try:
             if not g.db_conn.closed:
                 g.db_conn.close()
@@ -549,26 +637,25 @@ def reserve_zone(zone_prefix: str, badge: str, hours: int = 2) -> bool:
     try:
         conn = get_db()
         with conn.cursor() as cur:
-            # Проверяем, не занята ли уже эта зона
-            cur.execute("""
-                SELECT badge 
-                FROM active_tasks 
-                WHERE zone_prefix = %s 
-                    AND status = 'active'
-                    AND expires_at > CURRENT_TIMESTAMP
-            """, (zone_prefix,))
-            
-            existing = cur.fetchone()
-            
-            if existing:
-                logger.warning("Зона %s уже занята сотрудником %s", zone_prefix, existing['badge'])
-                return False
-            
-            # Резервируем зону
+            # Блокируем конкретную зону транзакционной advisory-lock, чтобы исключить гонку.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (zone_prefix,))
             cur.execute("""
                 INSERT INTO active_tasks (zone_prefix, badge, expires_at)
-                VALUES (%s, %s, CURRENT_TIMESTAMP + INTERVAL '%s hours')
-            """, (zone_prefix, badge, hours))
+                SELECT %s, %s, CURRENT_TIMESTAMP + (%s * INTERVAL '1 hour')
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM active_tasks
+                    WHERE zone_prefix = %s
+                      AND status = 'active'
+                      AND expires_at > CURRENT_TIMESTAMP
+                )
+                RETURNING task_id
+            """, (zone_prefix, badge, hours, zone_prefix))
+            inserted = cur.fetchone()
+            if not inserted:
+                logger.warning("Зона %s уже занята", zone_prefix)
+                conn.commit()
+                return False
             conn.commit()
             
             logger.info("Зона %s зарезервирована для %s на %d часов", zone_prefix, badge, hours)
@@ -610,7 +697,7 @@ def index():
 @app.route('/work')
 def work():
     """Рабочая форма инвентаризации."""
-    employee_badge = request.cookies.get('employee_badge')
+    employee_badge = _current_employee_badge()
     if not employee_badge:
         return redirect('/')
     return render_template('work.html', employee_badge=employee_badge)
@@ -619,8 +706,8 @@ def work():
 @app.route('/admin')
 def admin():
     """Страница входа в админ-панель. Если уже авторизован — редирект в дашборд."""
-    admin_badge = request.cookies.get('admin_badge')
-    if admin_badge and admin_badge == 'ADMIN':
+    admin_badge = _current_admin_badge()
+    if admin_badge and admin_badge == ADMIN_BADGE:
         return redirect('/admin/dashboard')
     return render_template('admin_login.html')
 
@@ -635,8 +722,8 @@ def admin_login_legacy():
 def admin_dashboard():
     """Дашборд админ-панели (защищенный)."""
     # Проверка авторизации
-    admin_badge = request.cookies.get('admin_badge')
-    if not admin_badge or admin_badge != 'ADMIN':
+    admin_badge = _current_admin_badge()
+    if not admin_badge or admin_badge != ADMIN_BADGE:
         return redirect('/admin')
     return render_template('admin.html')
 
@@ -644,26 +731,28 @@ def admin_dashboard():
 @app.route('/logout')
 def logout():
     """Выход сотрудника: сброс cookie и редирект на страницу входа."""
+    session.clear()
     response = redirect('/')
-    response.set_cookie('employee_badge', '', max_age=0)
+    _clear_cookie(response, 'employee_badge', httponly=True)
+    _clear_cookie(response, 'admin_badge', httponly=True)
+    _clear_cookie(response, CSRF_COOKIE_NAME, httponly=False)
     return response
 
 
 @app.route('/api/auth', methods=['POST'])
 def auth():
     """Авторизация по бэйджу сотрудника или администратора."""
-    data = request.get_json()
+    data = request.get_json() or {}
     badge = data.get('badge', '').strip()
     password = data.get('password', '').strip()
     
     if not badge:
         return jsonify({'error': 'Бэйдж не указан'}), 400
     
-    # Проверка на администратора
-    ADMIN_BADGE = 'ADMIN'
-    ADMIN_PASSWORD = 'admin123'
-    
     if badge == ADMIN_BADGE:
+        if not ADMIN_PASSWORD:
+            logger.error("ADMIN_PASSWORD не задан. Вход администратора отключен.")
+            return jsonify({'error': 'Вход администратора временно недоступен'}), 503
         # Это попытка входа администратора
         if not password:
             # Нужен пароль
@@ -674,19 +763,25 @@ def auth():
             }), 200
         
         # Проверка пароля
-        if password != ADMIN_PASSWORD:
+        if not hmac.compare_digest(password, ADMIN_PASSWORD):
             return jsonify({'error': 'Неверный пароль администратора'}), 401
         
         # Успешный вход администратора
+        session.clear()
+        session["is_admin"] = True
+        session["badge"] = ADMIN_BADGE
+        session.permanent = False
         response = jsonify({
             'success': True,
             'is_admin': True,
-            'badge': badge,
+            'badge': ADMIN_BADGE,
             'redirect': '/admin/dashboard',
             'timestamp': datetime.now().isoformat()
         })
-        response.set_cookie('admin_badge', badge, max_age=28800, httponly=True)
-        logger.info("Вход администратора: badge=%s", badge)
+        _set_auth_cookie(response, 'admin_badge', ADMIN_BADGE, max_age=28800, httponly=True)
+        _clear_cookie(response, 'employee_badge', httponly=True)
+        _issue_csrf_cookie(response)
+        logger.info("Вход администратора: badge=%s", ADMIN_BADGE)
         return response
     
     # Обычный сотрудник
@@ -695,6 +790,10 @@ def auth():
     
     logger.info("Авторизация сотрудника: badge=%s", badge)
     
+    session.clear()
+    session["is_admin"] = False
+    session["badge"] = badge
+    session.permanent = False
     response = jsonify({
         'success': True,
         'is_admin': False,
@@ -702,8 +801,9 @@ def auth():
         'redirect': '/work',
         'timestamp': datetime.now().isoformat()
     })
-    response.set_cookie('employee_badge', badge, max_age=28800, httponly=True)
-    response.set_cookie('admin_badge', '', max_age=0)
+    _set_auth_cookie(response, 'employee_badge', badge, max_age=28800, httponly=True)
+    _clear_cookie(response, 'admin_badge', httponly=True)
+    _issue_csrf_cookie(response)
     logger.info("Вход сотрудника: badge=%s", badge)
     return response
 
@@ -711,6 +811,9 @@ def auth():
 @app.route('/api/user/stats/<badge>', methods=['GET'])
 def get_user_stats(badge):
     """Получить статистику пользователя. Если передан since (timestamp в мс) — только данные смены с этого момента."""
+    badge, auth_err = _resolve_badge_for_user_scope(badge)
+    if auth_err:
+        return auth_err
     try:
         since_ts = request.args.get('since', type=lambda x: int(x) if x and str(x).isdigit() else None)
         since_sql = ""
@@ -812,6 +915,9 @@ def get_user_stats(badge):
 @app.route('/api/user/daily-stats/<badge>', methods=['GET'])
 def get_user_daily_stats(badge):
     """Динамика сканов пользователя за последние 7 дней."""
+    badge, auth_err = _resolve_badge_for_user_scope(badge)
+    if auth_err:
+        return auth_err
     try:
         conn = get_db()
         with conn.cursor() as cur:
@@ -844,12 +950,12 @@ def get_user_daily_stats(badge):
 @app.route('/api/user/history', methods=['GET'])
 def get_user_history():
     """Получить историю сканов сотрудника с фильтром по датам."""
-    badge = request.args.get('badge', '').strip()
+    requested_badge = request.args.get('badge', '').strip()
+    badge, auth_err = _resolve_badge_for_user_scope(requested_badge)
+    if auth_err:
+        return auth_err
     date_from = request.args.get('from')
     date_to = request.args.get('to')
-
-    if not badge:
-        return jsonify({'error': 'Не указан badge'}), 400
 
     # Если даты не заданы — берём сегодня
     try:
@@ -915,12 +1021,12 @@ def export_user_history():
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
 
-    badge = request.args.get('badge', '').strip()
+    requested_badge = request.args.get('badge', '').strip()
+    badge, auth_err = _resolve_badge_for_user_scope(requested_badge)
+    if auth_err:
+        return auth_err
     date_from = request.args.get('from')
     date_to = request.args.get('to')
-
-    if not badge:
-        return jsonify({'error': 'Не указан badge'}), 400
 
     try:
         conn = get_db()
@@ -1211,11 +1317,13 @@ def export_user_history_legacy():
 @app.route('/api/user/session/start', methods=['POST'])
 def start_user_session():
     """Начать новую сессию пользователя."""
-    data = request.get_json()
-    badge = data.get('badge')
+    data = request.get_json() or {}
+    badge, auth_err = _resolve_employee_badge_or_401()
+    if auth_err:
+        return auth_err
     login_time = data.get('login_time')
     
-    if not badge or not login_time:
+    if not login_time:
         return jsonify({'error': 'Недостаточно данных'}), 400
     
     conn = None
@@ -1255,12 +1363,11 @@ def start_user_session():
 @app.route('/api/user/session/update', methods=['POST'])
 def update_user_session():
     """Обновить статистику текущей сессии."""
-    data = request.get_json()
-    badge = data.get('badge')
+    data = request.get_json() or {}
+    badge, auth_err = _resolve_employee_badge_or_401()
+    if auth_err:
+        return auth_err
     stats = data.get('stats', {})
-    
-    if not badge:
-        return jsonify({'error': 'Недостаточно данных'}), 400
     
     conn = None
     try:
@@ -1293,10 +1400,9 @@ def update_user_session():
 @app.route('/api/user/shift/start', methods=['POST'])
 def start_shift():
     """Сброс границы смены: после этого дубликат МХ в рамках смены снова разрешён."""
-    data = request.get_json() or {}
-    badge = (data.get('badge') or '').strip()
-    if not badge:
-        return jsonify({'error': 'Не указан badge'}), 400
+    badge, auth_err = _resolve_employee_badge_or_401()
+    if auth_err:
+        return auth_err
     conn = None
     try:
         conn = get_db()
@@ -1318,20 +1424,23 @@ def start_shift():
 @app.route('/api/admin/auth', methods=['POST'])
 def admin_auth():
     """Авторизация администратора."""
-    data = request.get_json()
+    data = request.get_json() or {}
     badge = data.get('badge', '').strip()
     password = data.get('password', '').strip()
-    
-    # Учетные данные администратора (в production лучше хранить в БД с хешированием)
-    ADMIN_BADGE = 'ADMIN'
-    ADMIN_PASSWORD = 'admin123'
+    if not ADMIN_PASSWORD:
+        logger.error("ADMIN_PASSWORD не задан. Вход администратора отключен.")
+        return jsonify({'success': False, 'error': 'Вход администратора временно недоступен'}), 503
     
     if not badge or not password:
         return jsonify({'success': False, 'error': 'Заполните все поля'}), 400
     
-    if badge != ADMIN_BADGE or password != ADMIN_PASSWORD:
+    if badge != ADMIN_BADGE or not hmac.compare_digest(password, ADMIN_PASSWORD):
         return jsonify({'success': False, 'error': 'Неверный бэйдж или пароль'}), 401
     
+    session.clear()
+    session["is_admin"] = True
+    session["badge"] = ADMIN_BADGE
+    session.permanent = False
     # Создаем ответ с установкой cookie
     response = jsonify({
         'success': True,
@@ -1339,8 +1448,9 @@ def admin_auth():
     })
     
     # Устанавливаем cookie на 8 часов
-    response.set_cookie('admin_badge', badge, max_age=28800, httponly=True)
-    response.set_cookie('employee_badge', '', max_age=0)
+    _set_auth_cookie(response, 'admin_badge', badge, max_age=28800, httponly=True)
+    _clear_cookie(response, 'employee_badge', httponly=True)
+    _issue_csrf_cookie(response)
     
     return response
 
@@ -1348,8 +1458,11 @@ def admin_auth():
 @app.route('/api/admin/logout', methods=['POST'])
 def admin_logout():
     """Выход из админ-панели."""
+    session.clear()
     response = jsonify({'success': True})
-    response.set_cookie('admin_badge', '', max_age=0)
+    _clear_cookie(response, 'admin_badge', httponly=True)
+    _clear_cookie(response, 'employee_badge', httponly=True)
+    _clear_cookie(response, CSRF_COOKIE_NAME, httponly=False)
     return response
 
 
@@ -1362,14 +1475,19 @@ def get_place(place_cod):
 @app.route('/api/scan/complete', methods=['POST'])
 def complete_scan():
     """Фиксация результата сканирования сотрудником."""
-    return complete_scan_handler(get_db)
+    badge, auth_err = _resolve_employee_badge_or_401()
+    if auth_err:
+        return auth_err
+    return complete_scan_handler(get_db, badge_override=badge)
 
 
 @app.route('/api/export', methods=['POST'])
 def export_results():
     """Экспорт результатов инвентаризации в Excel и сохранение в БД."""
-    data = request.get_json()
-    badge = data.get('badge', 'unknown')
+    badge, auth_err = _resolve_employee_badge_or_401()
+    if auth_err:
+        return auth_err
+    data = request.get_json() or {}
     results = data.get('results', [])
     
     if not results:
@@ -1576,8 +1694,10 @@ def export_results():
 def get_new_task():
     """Получить новое задание для сотрудника."""
     try:
-        data = request.get_json()
-        badge = data.get('badge', '')
+        badge, auth_err = _resolve_employee_badge_or_401()
+        if auth_err:
+            return auth_err
+        data = request.get_json() or {}
         zone_size = data.get('zone_size', 50)
         
         logger.info("Запрос нового задания от %s, размер: %d", badge, zone_size)
@@ -1714,12 +1834,14 @@ def complete_task():
     """Завершить задание и освободить зону."""
     conn = None
     try:
-        data = request.get_json()
-        badge = data.get('badge', '')
+        badge, auth_err = _resolve_employee_badge_or_401()
+        if auth_err:
+            return auth_err
+        data = request.get_json() or {}
         zone = data.get('zone', '')
         
-        if not badge or not zone:
-            return jsonify({'error': 'Не указан badge или zone'}), 400
+        if not zone:
+            return jsonify({'error': 'Не указан zone'}), 400
         
         conn = get_db()
         with conn.cursor() as cur:
@@ -1755,6 +1877,9 @@ def complete_task():
 @app.route('/api/tasks/active', methods=['GET'])
 def get_active_tasks():
     """Получить список активных заданий (для администратора)."""
+    admin_badge = _current_admin_badge()
+    if not admin_badge or admin_badge != ADMIN_BADGE:
+        return jsonify({'error': 'Доступ запрещен'}), 403
     try:
         conn = get_db()
         with conn.cursor() as cur:
@@ -2040,6 +2165,8 @@ def get_task_suggestions():
 @app.route('/api/sync', methods=['GET'])
 def sync_data():
     """Синхронизация данных для offline работы (поддерживает инкрементальную загрузку)."""
+    if not _is_authenticated_for_sync():
+        return jsonify({"error": "Требуется авторизация"}), 401
     allowed, retry_after = _check_rate_limit("sync_data", limit=600, window_seconds=60)
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
@@ -2138,6 +2265,8 @@ def sync_data():
 @app.route('/api/sync/blocks', methods=['GET'])
 def get_sync_blocks():
     """Список доступных блоков из warehouse_name."""
+    if not _is_authenticated_for_sync():
+        return jsonify({"error": "Требуется авторизация"}), 401
     allowed, retry_after = _check_rate_limit("sync_blocks", limit=30, window_seconds=60)
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429
@@ -2163,6 +2292,8 @@ def get_sync_blocks():
 @app.route('/api/sync/floors', methods=['GET'])
 def get_sync_floors():
     """Список доступных этажей для выбранных блоков."""
+    if not _is_authenticated_for_sync():
+        return jsonify({"error": "Требуется авторизация"}), 401
     allowed, retry_after = _check_rate_limit("sync_floors", limit=60, window_seconds=60)
     if not allowed:
         return jsonify({'error': f'Слишком много запросов. Повторите через {retry_after} сек.'}), 429

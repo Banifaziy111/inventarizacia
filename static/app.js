@@ -42,6 +42,32 @@ let _placeCacheFlushTimer = null;
 let _placeIdbPromise = null;
 let _placeIdbWriteTail = Promise.resolve();
 
+function readCookie(name) {
+    const safeName = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = document.cookie.match(new RegExp(`(?:^|; )${safeName}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : "";
+}
+
+function getCsrfToken() {
+    return readCookie("csrf_token");
+}
+
+function getCsrfHeaders(method) {
+    const upperMethod = String(method || "GET").toUpperCase();
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(upperMethod)) return {};
+    const token = getCsrfToken();
+    return token ? { "X-CSRF-Token": token } : {};
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function normalizePlaceCacheStore(store) {
     const src = store && typeof store === "object" ? store : {};
     const items = src.items && typeof src.items === "object" ? src.items : {};
@@ -507,7 +533,7 @@ async function syncOfflineQueue() {
             try {
                 const res = await fetch("/api/scan/complete", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Content-Type": "application/json", ...getCsrfHeaders("POST") },
                     credentials: "include",
                     body: JSON.stringify(item.body || (item.place_cod ? item : item.body) || {}),
                 });
@@ -577,6 +603,11 @@ const API = {
             },
             credentials: "include",
             ...options,
+        };
+        const method = String(config.method || "GET").toUpperCase();
+        config.headers = {
+            ...(config.headers || {}),
+            ...getCsrfHeaders(method),
         };
 
         if (config.body && typeof config.body !== "string") {
@@ -742,7 +773,7 @@ function showToastMessage(message, type = "success") {
         <div class="d-flex align-items-center w-100">
             <div class="toast-body flex-grow-1">
                 <i class="bi ${icons[type] || icons.info} me-2"></i>
-                <span>${message}</span>
+                <span>${escapeHtml(message)}</span>
             </div>
             <button type="button" class="btn-close btn-close-white flex-shrink-0" data-bs-dismiss="toast" aria-label="Закрыть"></button>
         </div>`;
@@ -774,7 +805,7 @@ function initMenuBadgeAndLogout() {
         menuLogoutBtn.addEventListener("click", (e) => {
             e.preventDefault();
             if (isAdminDashboard) {
-                fetch("/api/admin/logout", { method: "POST", credentials: "include" })
+                fetch("/api/admin/logout", { method: "POST", credentials: "include", headers: getCsrfHeaders("POST") })
                     .then(() => { window.location.href = "/admin"; })
                     .catch(() => { window.location.href = "/admin"; });
             } else if (badgeFromBody) {
@@ -2092,7 +2123,7 @@ function initWorkPage() {
         );
         if (!ok || data.error) {
             if (routeSuggestionsEl) {
-                routeSuggestionsEl.innerHTML = `<span class="text-danger small">${data?.error || "Не удалось загрузить ближайшие МХ"}</span>`;
+                routeSuggestionsEl.innerHTML = `<span class="text-danger small">${escapeHtml(data?.error || "Не удалось загрузить ближайшие МХ")}</span>`;
             }
             if (routeMapEl) routeMapEl.innerHTML = "";
             return;
@@ -3905,7 +3936,7 @@ function initAdminDashboard() {
         const { ok, data } = await API.get(`/api/admin/analytics?period=${encodeURIComponent(period)}`);
         if (!ok || data.error) {
             if (dailyChartCanvas) {
-                dailyChartCanvas.innerHTML = `<div class="text-danger">${data.error || "Ошибка загрузки аналитики"}</div>`;
+                dailyChartCanvas.innerHTML = `<div class="text-danger">${escapeHtml(data.error || "Ошибка загрузки аналитики")}</div>`;
             }
             return;
         }
@@ -3942,7 +3973,7 @@ function initAdminDashboard() {
         if (!photoPreviewModalEl || !photoPreviewThumbs) return;
         const { ok, data } = await API.get(`/api/admin/place/${encodeURIComponent(placeCod)}/photos`);
         if (!ok || data.error) {
-            photoPreviewThumbs.innerHTML = `<div class="text-danger small">${data.error || "Ошибка загрузки фото по месту"}</div>`;
+            photoPreviewThumbs.innerHTML = `<div class="text-danger small">${escapeHtml(data.error || "Ошибка загрузки фото по месту")}</div>`;
             photoPreviewImg.src = "";
             photoPreviewImg.classList.add("d-none");
             photoPreviewMeta.textContent = "";
@@ -4019,7 +4050,7 @@ function initAdminDashboard() {
         if (!activeTasksTableBody) return;
         const { ok, data } = await API.get("/api/tasks/active");
         if (!ok || data.error) {
-            activeTasksTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${data.error || "Ошибка загрузки"}</td></tr>`;
+            activeTasksTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${escapeHtml(data.error || "Ошибка загрузки")}</td></tr>`;
             return;
         }
 
@@ -4056,7 +4087,7 @@ function initAdminDashboard() {
         const { ok, data } = await API.get("/api/admin/latest_scans");
         if (!ok || data.error) {
             if (adminPhotoGrid) {
-                adminPhotoGrid.innerHTML = `<div class="text-danger small">${data.error || "Ошибка загрузки фото"}</div>`;
+                adminPhotoGrid.innerHTML = `<div class="text-danger small">${escapeHtml(data.error || "Ошибка загрузки фото")}</div>`;
             }
             return;
         }
@@ -4093,7 +4124,7 @@ function initAdminDashboard() {
         if (!qualityTableBody && !qualityReviewList) return;
         const { ok, data } = await API.get("/api/admin/reviews");
         if (!ok || data.error) {
-            if (qualityTableBody) qualityTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">${data?.error || "Ошибка загрузки"}</td></tr>`;
+            if (qualityTableBody) qualityTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-3">${escapeHtml(data?.error || "Ошибка загрузки")}</td></tr>`;
             if (qualityReviewList) qualityReviewList.innerHTML = '<div class="list-group-item text-muted small admin-empty-list"><i class="bi bi-clipboard-check me-2"></i>Ревизии не загружены</div>';
             return;
         }
@@ -4138,7 +4169,7 @@ function initAdminDashboard() {
         if (!ticketsBoard) return;
         const { ok, data } = await API.get("/api/admin/tickets");
         if (!ok || data.error) {
-            ticketsBoard.innerHTML = `<div class="text-danger small">${data?.error || "Ошибка загрузки"}</div>`;
+            ticketsBoard.innerHTML = `<div class="text-danger small">${escapeHtml(data?.error || "Ошибка загрузки")}</div>`;
             return;
         }
 
@@ -4176,7 +4207,7 @@ function initAdminDashboard() {
         if (!adminActivityList) return;
         const { ok, data } = await API.get("/api/admin/activity");
         if (!ok || data.error) {
-            adminActivityList.innerHTML = `<div class="text-danger small">${data.error || "Ошибка загрузки журнала"}</div>`;
+            adminActivityList.innerHTML = `<div class="text-danger small">${escapeHtml(data.error || "Ошибка загрузки журнала")}</div>`;
             return;
         }
 
@@ -4567,7 +4598,7 @@ function initAdminDashboard() {
         if (dashboardBlockErrorsCount) dashboardBlockErrorsCount.textContent = "";
         const { ok, data } = await API.get(`/api/admin/block/errors?wh_id=${encodeURIComponent(whId)}`);
         if (!ok || data.error) {
-            dashboardBlockErrorsBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-2">${data.error || "Ошибка загрузки"}</td></tr>`;
+            dashboardBlockErrorsBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-2">${escapeHtml(data.error || "Ошибка загрузки")}</td></tr>`;
             return;
         }
         const places = data.places || [];
@@ -4599,7 +4630,7 @@ function initAdminDashboard() {
                     const currentWhId = dashboardBlockErrorsSelect?.value?.trim();
                     if (!currentWhId) return;
                     if (newStatus === "") {
-                        const res = await fetch(`/api/admin/block/repaired?wh_id=${encodeURIComponent(currentWhId)}&place_cod=${encodeURIComponent(placeCod)}`, { method: "DELETE", credentials: "include" });
+                        const res = await fetch(`/api/admin/block/repaired?wh_id=${encodeURIComponent(currentWhId)}&place_cod=${encodeURIComponent(placeCod)}`, { method: "DELETE", credentials: "include", headers: getCsrfHeaders("DELETE") });
                         const json = await res.json().catch(() => ({}));
                         if (res.ok && json.success) {
                             row.classList.remove("table-success", "table-warning");
@@ -4610,7 +4641,7 @@ function initAdminDashboard() {
                         const res = await fetch("/api/admin/block/repaired", {
                             method: "POST",
                             credentials: "include",
-                            headers: { "Content-Type": "application/json" },
+                            headers: { "Content-Type": "application/json", ...getCsrfHeaders("POST") },
                             body: JSON.stringify({ wh_id: parseInt(currentWhId, 10), place_cod: parseInt(placeCod, 10), status: newStatus }),
                         });
                         const json = await res.json().catch(() => ({}));
@@ -4673,7 +4704,7 @@ function initAdminDashboard() {
         try {
             const { ok, data } = await API.get("/api/admin/reports");
             if (!ok || data.error) {
-                reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">${(data && data.error) || "Ошибка загрузки"}</td></tr>`;
+                reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">${escapeHtml((data && data.error) || "Ошибка загрузки")}</td></tr>`;
                 return;
             }
             const reports = Array.isArray(data.reports) ? data.reports : [];
@@ -4700,7 +4731,7 @@ function initAdminDashboard() {
                 : `<tr><td colspan="5" class="text-center text-muted py-3">Отчеты отсутствуют</td></tr>`;
         } catch (err) {
             console.error("loadReports error", err);
-            reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">Ошибка: ${err.message || "не удалось загрузить"}</td></tr>`;
+            reportsTableBody.innerHTML = `<tr><td colspan="5" class="text-danger text-center py-3">Ошибка: ${escapeHtml(err.message || "не удалось загрузить")}</td></tr>`;
         }
     }
 }
