@@ -391,6 +391,9 @@ const SoundFeedback = {
             gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
             osc.start(ctx.currentTime);
             osc.stop(ctx.currentTime + 0.15);
+            if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+                navigator.vibrate([22, 18, 22]);
+            }
         } catch (_) {}
     },
     playError() {
@@ -721,17 +724,20 @@ async function fetchJsonWithTimeout(path, timeoutMs = 4500) {
 
 async function getConnectivitySnapshot() {
     if (!navigator.onLine) {
-        return { offline: true, serverReachable: false, dbWritable: false };
+        return { offline: true, serverReachable: false, dbWritable: false, pingMs: null };
     }
+    const pingStarted = (performance.now ? performance.now() : Date.now());
     const ping = await fetchJsonWithTimeout("/api/ping", 3500);
+    const pingMs = Math.max(0, Math.round((performance.now ? performance.now() : Date.now()) - pingStarted));
     if (!ping.ok || !ping.data?.ok) {
-        return { offline: false, serverReachable: false, dbWritable: false };
+        return { offline: false, serverReachable: false, dbWritable: false, pingMs };
     }
     const health = await fetchJsonWithTimeout("/api/health", 4500);
     return {
         offline: false,
         serverReachable: true,
         dbWritable: !!(health.ok && health.data?.ok),
+        pingMs,
     };
 }
 
@@ -1238,6 +1244,9 @@ function initWorkPage() {
     const historyTableBody = document.getElementById("historyTableBody");
     const historyDownloadBadBtn = document.getElementById("historyDownloadBadBtn");
     const onlineBadge = document.getElementById("onlineBadge");
+    const headerNetworkIndicator = document.getElementById("headerNetworkIndicator");
+    const headerTopQueueIndicator = document.getElementById("headerTopQueueIndicator");
+    const headerTopQueueCount = document.getElementById("headerTopQueueCount");
     const scanOnlyToggle = document.getElementById("scanOnlyToggle");
     const scanOnlyOkBtn = document.getElementById("scanOnlyOkBtn");
     const scanOnlyErrorBtn = document.getElementById("scanOnlyErrorBtn");
@@ -1661,6 +1670,20 @@ function initWorkPage() {
                 }
             }
         }
+        if (headerTopQueueIndicator && headerTopQueueCount) {
+            headerTopQueueCount.textContent = n;
+            headerTopQueueIndicator.classList.remove("text-bg-success", "text-bg-warning", "text-bg-danger");
+            if (conflicts > 0) {
+                headerTopQueueIndicator.classList.add("text-bg-danger");
+                headerTopQueueIndicator.title = `Очередь: ${n}. Конфликтных: ${conflicts}`;
+            } else if (n > 0) {
+                headerTopQueueIndicator.classList.add("text-bg-warning");
+                headerTopQueueIndicator.title = `Очередь: ${n}. Ожидает отправки`;
+            } else {
+                headerTopQueueIndicator.classList.add("text-bg-success");
+                headerTopQueueIndicator.title = "Очередь пуста";
+            }
+        }
         const headerIndicator = document.getElementById("headerOfflineQueueIndicator");
         const headerCount = document.getElementById("headerOfflineQueueCount");
         if (headerIndicator && headerCount) {
@@ -1728,22 +1751,31 @@ function initWorkPage() {
 
     async function updateOnlineStatus() {
         updateOfflineQueueUI();
-        if (!onlineBadge) return;
+        const networkBadge = headerNetworkIndicator || onlineBadge;
+        if (!networkBadge) return;
         const status = await getConnectivitySnapshot();
         if (status.offline) {
-            onlineBadge.textContent = "Офлайн";
-            onlineBadge.className = "badge bg-danger rounded-pill mt-2";
+            networkBadge.textContent = "Сеть: офлайн";
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-danger";
             return;
         }
-        if (status.serverReachable && status.dbWritable) {
-            onlineBadge.textContent = "Онлайн";
-            onlineBadge.className = "badge bg-success rounded-pill mt-2";
+        const pingMs = Number(status.pingMs);
+        const hasPing = Number.isFinite(pingMs) && pingMs >= 0;
+        if (status.serverReachable && status.dbWritable && hasPing && pingMs <= 350) {
+            networkBadge.textContent = `Сеть: отличная (${pingMs}мс)`;
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-success";
+        } else if (status.serverReachable && status.dbWritable && hasPing && pingMs <= 900) {
+            networkBadge.textContent = `Сеть: нормальная (${pingMs}мс)`;
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-success";
+        } else if (status.serverReachable && status.dbWritable) {
+            networkBadge.textContent = hasPing ? `Сеть: слабая (${pingMs}мс)` : "Сеть: онлайн";
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-warning";
         } else if (status.serverReachable) {
-            onlineBadge.textContent = "Сервер без БД";
-            onlineBadge.className = "badge bg-warning rounded-pill mt-2";
+            networkBadge.textContent = "Сеть: сервер без БД";
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-warning";
         } else {
-            onlineBadge.textContent = "Нет связи";
-            onlineBadge.className = "badge bg-warning rounded-pill mt-2";
+            networkBadge.textContent = "Сеть: нет связи";
+            networkBadge.className = "badge rounded-pill header-network-indicator text-bg-danger";
         }
     }
 
@@ -3242,6 +3274,7 @@ function initWorkPage() {
             return;
         }
         placeInput.value = placeCod;
+        SoundFeedback.playSuccess();
         showToastMessage("QR-код считан");
         closeQrOverlay();
         loadPlace(placeCod);

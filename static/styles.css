@@ -787,6 +787,11 @@ button:focus-visible,
     font-size: .7rem;
     font-weight: 600;
 }
+.header-network-indicator,
+.header-top-queue-indicator {
+    font-size: .72rem;
+    font-weight: 600;
+}
 
 /* ============================================================
    СТРАНИЦА ВХОДА
