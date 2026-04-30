@@ -1164,6 +1164,7 @@ function initLoginPage() {
 
 const SHIFT_START_KEY = "inventory_shift_start";
 const NEW_SHIFT_KEY = "inventory_new_shift";
+const ONE_HAND_MODE_STORAGE_KEY = "inventory_one_hand_mode";
 
 function initWorkPage() {
     const pageBadge = document.body.dataset.badge;
@@ -1238,6 +1239,9 @@ function initWorkPage() {
     const refreshRouteBtn = document.getElementById("refreshRouteBtn");
     const routeFilterSelect = document.getElementById("routeFilterSelect");
     const quickScanModeCheck = document.getElementById("quickScanMode");
+    const oneHandModeToggle = document.getElementById("oneHandModeToggle");
+    const oneHandDock = document.getElementById("oneHandDock");
+    const oneHandSaveBtn = document.getElementById("oneHandSaveBtn");
     const historyFromInput = document.getElementById("historyFrom");
     const historyToInput = document.getElementById("historyTo");
     const historyReloadBtn = document.getElementById("historyReloadBtn");
@@ -1263,6 +1267,8 @@ function initWorkPage() {
     const contextFreshChip = document.getElementById("contextFreshChip");
     const lastScanAgoChip = document.getElementById("lastScanAgoChip");
     const quickReasonChips = document.getElementById("quickReasonChips");
+    const quickErrorWrap = document.getElementById("quickErrorWrap");
+    const quickErrorTitle = document.getElementById("quickErrorTitle");
     const quickErrorGrid = document.getElementById("quickErrorGrid");
     const historyShowTodayBtn = document.getElementById("historyShowTodayBtn");
     const emptyStateScanNowBtn = document.getElementById("emptyStateScanNowBtn");
@@ -1718,6 +1724,14 @@ function initWorkPage() {
         }
     }
 
+    function applyOneHandMode() {
+        const on = !!state.oneHandMode;
+        try { localStorage.setItem(ONE_HAND_MODE_STORAGE_KEY, on ? "1" : "0"); } catch (e) {}
+        document.body.classList.toggle("one-hand-mode", on);
+        if (oneHandModeToggle) oneHandModeToggle.checked = on;
+        if (oneHandDock) oneHandDock.classList.toggle("d-none", !on);
+    }
+
     function extractBlockLabel(value) {
         const s = (value || "").toString().trim().toUpperCase();
         const m = s.match(/^(Э\d+)/);
@@ -1891,6 +1905,24 @@ function initWorkPage() {
         return Math.trunc(n);
     }
 
+    function getShiftStartTimestamp() {
+        try {
+            const raw = sessionStorage.getItem(SHIFT_START_KEY);
+            const ts = Number(raw);
+            return Number.isFinite(ts) && ts > 0 ? ts : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function isHistoryItemInCurrentShift(item) {
+        const shiftStartTs = getShiftStartTimestamp();
+        if (!shiftStartTs) return true;
+        const createdTs = Date.parse(String(item?.created_at || ""));
+        if (!Number.isFinite(createdTs)) return true;
+        return createdTs >= shiftStartTs;
+    }
+
     function resolveDuplicateOnLoad(placeCod, placeData) {
         state.allowDuplicateForCurrentPlace = false;
         syncDuplicateDetailsVisibility();
@@ -1902,10 +1934,10 @@ function initWorkPage() {
             "Такая ячейка уже сканировалась в текущей смене.\nЭто задвойка?"
         );
         if (!confirmDuplicate) {
-            showAlert(placeAlert, "Скан отменен: задвойка не подтверждена", "info");
-            logEvent("Повторный скан отменен пользователем", "info");
-            focusPlaceInput(true);
-            return "cancel";
+            // Не блокируем сценарий: пользователь может продолжить как обычный скан.
+            showAlert(placeAlert, "Задвойка не подтверждена. Продолжайте как обычный скан.", "info");
+            logEvent("Задвойка не подтверждена, продолжаем обычный сценарий", "info");
+            return "declined";
         }
 
         state.allowDuplicateForCurrentPlace = true;
@@ -1930,6 +1962,9 @@ function initWorkPage() {
         suggestions: [],
         scannedPlaceCodes: new Set(),
         quickScanMode: false,
+        oneHandMode: (() => {
+            try { return localStorage.getItem(ONE_HAND_MODE_STORAGE_KEY) === "1"; } catch (e) { return false; }
+        })(),
         routeFilter: "all",
         scanOnlyMode: (() => {
             try { return localStorage.getItem(SCAN_ONLY_STORAGE_KEY) === "1"; } catch (e) { return false; }
@@ -1953,23 +1988,33 @@ function initWorkPage() {
     let qrOverlayTorchBtn = null;
 
     const STATUS_META = {
-        ok: { label: "Совпадает", badge: "success" },
-        error: { label: "Ошибка", badge: "danger" },
-        missing: { label: "Отсутствует", badge: "warning" },
-        shelf_error: { label: "Поломалось", badge: "warning" },
-        default: { label: "Неизвестно", badge: "secondary" },
+        ok: { label: "Совпадает", pillClass: "status-pill--ok" },
+        error: { label: "Ошибка", pillClass: "status-pill--error" },
+        missing: { label: "Отсутствует", pillClass: "status-pill--missing" },
+        shelf_error: { label: "Поломалось", pillClass: "status-pill--shelf" },
+        default: { label: "Неизвестно", pillClass: "status-pill--neutral" },
     };
 
     function updateStatusLabel() {
         if (!statusLabel) return;
         if (!state.currentStatus) {
             statusLabel.textContent = "Статус не выбран";
-            statusLabel.className = "badge text-bg-secondary";
+            statusLabel.className = "badge rounded-pill status-pill status-pill--neutral";
             return;
         }
         const meta = STATUS_META[state.currentStatus];
         statusLabel.textContent = meta?.label || state.currentStatus;
-        statusLabel.className = `badge text-bg-${meta?.badge || "secondary"}`;
+        statusLabel.className = `badge rounded-pill status-pill ${meta?.pillClass || "status-pill--neutral"}`;
+    }
+
+    function syncQuickReasonChipsActive() {
+        if (!quickReasonChips || !discrepancyReasonSelect) return;
+        const selected = discrepancyReasonSelect.value || "";
+        quickReasonChips.querySelectorAll("[data-reason-chip]").forEach((chip) => {
+            const active = chip.dataset.reasonChip === selected && !!selected;
+            chip.classList.toggle("active", active);
+            chip.setAttribute("aria-pressed", active ? "true" : "false");
+        });
     }
 
     /** Причины по статусам: Ошибка, Отсутствует, Поломалось (sub — подпункты выпадающего списка, detailPlaceholder — подсказка для текстового поля) */
@@ -2031,6 +2076,23 @@ function initWorkPage() {
                 .map((x) => `<button type="button" class="quick-reason-chip" data-reason-chip="${x.value}">${x.text}</button>`)
                 .join("");
         }
+        syncQuickReasonChipsActive();
+    }
+
+    function renderQuickErrorButtons(status) {
+        if (!quickErrorGrid) return;
+        const list = (status && REASONS_BY_STATUS[status]) ? REASONS_BY_STATUS[status] : [];
+        if (quickErrorTitle) {
+            quickErrorTitle.textContent = status === "missing" ? "Быстрый выбор причин отсутствия" : "Быстрый выбор причины";
+        }
+        if (!list.length) {
+            quickErrorGrid.innerHTML = "";
+            return;
+        }
+        quickErrorGrid.innerHTML = list
+            .slice(0, 4)
+            .map((x) => `<button type="button" class="quick-error-btn" data-quick-error="${x.value}">${x.text}</button>`)
+            .join("");
     }
 
     function showReasonDetail(reasonOption) {
@@ -2063,10 +2125,23 @@ function initWorkPage() {
 
     function setStatus(value) {
         state.currentStatus = value;
+        if (quickErrorWrap) {
+            quickErrorWrap.classList.toggle("d-none", !value || value === "ok");
+        }
+        renderQuickErrorButtons(value);
         statusButtonsContainer
             ?.querySelectorAll("[data-status]")
             .forEach((btn) => {
                 btn.classList.toggle("active", btn.dataset.status === value);
+            });
+        oneHandDock
+            ?.querySelectorAll("[data-onehand-status]")
+            .forEach((btn) => {
+                const active = btn.dataset.onehandStatus === value;
+                btn.classList.toggle("active-ok", active && value === "ok");
+                btn.classList.toggle("active-error", active && value === "error");
+                btn.classList.toggle("active-missing", active && value === "missing");
+                btn.classList.toggle("active-shelf", active && value === "shelf_error");
             });
         updateStatusLabel();
         if (discrepancyReasonBlock) {
@@ -2264,7 +2339,11 @@ function initWorkPage() {
         }
 
         const history = data.history || [];
-        history.forEach((item) => rememberScannedPlace(item?.place_cod, item?.place_name));
+        // Локальная duplicate-проверка должна учитывать только текущую смену.
+        state.scannedPlaceCodes.clear();
+        history
+            .filter((item) => isHistoryItemInCurrentShift(item))
+            .forEach((item) => rememberScannedPlace(item?.place_cod, item?.place_name));
         state.recentScans = history.slice(0, 3);
         renderMiniRecentScans();
         if (!history.length) {
@@ -2779,6 +2858,7 @@ function initWorkPage() {
         const scanOnlyBtns = document.querySelectorAll(".scan-only-btn");
         saveSpinner?.classList.remove("d-none");
         saveScanBtn?.setAttribute("disabled", "disabled");
+        oneHandSaveBtn?.setAttribute("disabled", "disabled");
         scanOnlyBtns.forEach((b) => b?.setAttribute("disabled", "disabled"));
         let ok = false;
         let data = {};
@@ -2789,6 +2869,7 @@ function initWorkPage() {
         } finally {
             saveSpinner?.classList.add("d-none");
             saveScanBtn?.removeAttribute("disabled");
+            oneHandSaveBtn?.removeAttribute("disabled");
             scanOnlyBtns.forEach((b) => b?.removeAttribute("disabled"));
             saveInFlight = false;
         }
@@ -3320,6 +3401,10 @@ function initWorkPage() {
     quickScanModeCheck?.addEventListener("change", () => {
         state.quickScanMode = !!quickScanModeCheck?.checked;
     });
+    oneHandModeToggle?.addEventListener("change", () => {
+        state.oneHandMode = !!oneHandModeToggle?.checked;
+        applyOneHandMode();
+    });
     syncCatalogBtn?.addEventListener("click", () => {
         openSyncCatalogModal();
     });
@@ -3425,21 +3510,25 @@ function initWorkPage() {
         if (!target) return;
         setStatus(target.dataset.status);
     });
+    oneHandDock?.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-onehand-status]");
+        if (!target) return;
+        setStatus(target.dataset.onehandStatus);
+    });
     quickReasonChips?.addEventListener("click", (event) => {
         const chip = event.target.closest("[data-reason-chip]");
         if (!chip || !discrepancyReasonSelect) return;
         discrepancyReasonSelect.value = chip.dataset.reasonChip || "";
         discrepancyReasonSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        syncQuickReasonChipsActive();
     });
     quickErrorGrid?.addEventListener("click", (event) => {
         const btn = event.target.closest("[data-quick-error]");
         if (!btn || !discrepancyReasonSelect) return;
         const reason = btn.dataset.quickError || "";
-        // Один клик: переводим в статус Ошибка и сразу выбираем типовую причину.
-        setStatus("error");
         discrepancyReasonSelect.value = reason;
         discrepancyReasonSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        const label = btn.textContent?.trim() || "ошибка";
+        const label = btn.textContent?.trim() || "причина";
         showToastMessage(`Выбрано: ${label}`, "info");
     });
     emptyStateScanNowBtn?.addEventListener("click", () => startQrScanner());
@@ -3454,6 +3543,7 @@ function initWorkPage() {
 
     discrepancyReasonSelect?.addEventListener("change", (event) => {
         const value = event.target.value;
+        syncQuickReasonChipsActive();
         hideReasonDetail();
         if (value === 'other') {
             if (otherReasonBlock) otherReasonBlock.classList.remove('d-none');
@@ -3490,6 +3580,7 @@ function initWorkPage() {
         clearPhoto();
     });
     saveScanBtn?.addEventListener("click", saveScan);
+    oneHandSaveBtn?.addEventListener("click", saveScan);
     openQrScannerBtn?.addEventListener("click", startQrScanner);
     fabScanBtn?.addEventListener("click", startQrScanner);
     document.addEventListener("keydown", (e) => {
@@ -3662,6 +3753,7 @@ function initWorkPage() {
     });
 
     applyScanOnlyMode();
+    applyOneHandMode();
     setTodayDates();
     updateTodaySavedCount();
     loadRouteSuggestions();

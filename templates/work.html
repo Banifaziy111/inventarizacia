@@ -17,12 +17,12 @@
                 <h1 class="page-header-title">Сканирование мест</h1>
                 <p class="page-header-sub">Бэйдж: <strong id="currentBadge">{{ employee_badge }}</strong></p>
             </div>
-            <div class="d-flex gap-2 align-items-center flex-wrap">
+            <div class="page-header-actions d-flex gap-2 align-items-center flex-wrap">
                 <div class="form-check form-switch mb-0" title="Упрощённый экран: ввод + карточка + Совпадает/Отсутствует">
                     <input class="form-check-input" type="checkbox" id="scanOnlyToggle">
                     <label class="form-check-label small" for="scanOnlyToggle">Только скан</label>
                 </div>
-                <div class="full-mode-only d-flex gap-2">
+                <div class="full-mode-only d-flex gap-2 page-header-tools">
                     <button class="btn btn-sm btn-outline-secondary" id="newShiftBtn" title="Начать новую смену">
                         <i class="bi bi-clock-history me-1"></i>Новая смена
                     </button>
@@ -145,7 +145,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="place-card-empty-state text-center" id="placeCardEmptyHint">
+                            <div class="place-card-empty-state empty-state text-center" id="placeCardEmptyHint">
                                 <i class="bi bi-upc-scan empty-state-icon d-block mb-2" aria-hidden="true"></i>
                                 <p class="place-card-empty-hint text-muted small mb-1 fw-semibold">Введите код МХ</p>
                                 <p class="place-card-empty-hint text-muted small mb-0">и нажмите «Получить» или отсканируйте штрихкод</p>
@@ -180,14 +180,14 @@
     </section>
 
     {# ── Фиксация результата ── #}
-    <section class="card work-block full-mode-only">
+    <section class="card work-block full-mode-only scan-fix-card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span class="section-title"><i class="bi bi-clipboard-check"></i>Фиксация результата</span>
             <span class="badge rounded-pill" id="statusLabel"
                   style="background:var(--bg-elevated);color:var(--text-muted)">Не выбран</span>
         </div>
         <div class="card-body">
-            <p class="small text-muted mb-2">Выберите статус проверки</p>
+            <p class="small text-muted mb-2 scan-fix-hint">Выберите статус проверки</p>
 
             {# Кнопки статусов — новые плитки #}
             <div class="status-btn-grid mb-3" id="statusButtons">
@@ -209,17 +209,12 @@
                 </button>
             </div>
 
-            <div class="quick-error-wrap mb-3" id="quickErrorWrap">
-                <div class="small text-muted mb-2">Быстрый выбор ошибок</div>
-                <div class="quick-error-grid" id="quickErrorGrid">
-                    <button type="button" class="quick-error-btn" data-quick-error="no_rack">Нет стеллажа</button>
-                    <button type="button" class="quick-error-btn" data-quick-error="no_shelf">Нет полки</button>
-                    <button type="button" class="quick-error-btn" data-quick-error="no_container">Нет короба</button>
-                    <button type="button" class="quick-error-btn" data-quick-error="other">Другое</button>
-                </div>
+            <div class="quick-error-wrap mb-3 d-none" id="quickErrorWrap">
+                <div class="small text-muted mb-2" id="quickErrorTitle">Быстрый выбор причины</div>
+                <div class="quick-error-grid" id="quickErrorGrid"></div>
             </div>
 
-            <div class="alert alert-light border d-none py-2" id="discrepancyReasonBlock">
+            <div class="alert alert-light border d-none py-2 scan-fix-alert" id="discrepancyReasonBlock">
                 <label class="form-label fw-semibold small" id="discrepancyReasonLabel">Причина</label>
                 <div class="quick-reason-chips mb-2" id="quickReasonChips"></div>
                 <select class="form-select form-select-sm mb-2" id="discrepancyReasonSelect">
@@ -235,12 +230,7 @@
                 </div>
             </div>
 
-            <div class="mb-3">
-                <label class="form-label">Комментарий</label>
-                <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
-            </div>
-
-            <div class="alert alert-warning border d-none py-2 mb-3" id="duplicateDetailsBlock">
+            <div class="alert alert-warning border d-none py-2 mb-3 scan-fix-alert scan-fix-alert-warning" id="duplicateDetailsBlock">
                 <label class="form-label fw-semibold small mb-2">Подтверждена задвойка — укажите текущее место</label>
                 <div class="row g-2">
                     <div class="col-4">
@@ -256,22 +246,36 @@
                 <div class="form-text mt-1 mb-0">Без этажа, ряда и стеллажа задвойка не сохранится</div>
             </div>
 
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label">Фото</label>
-                    <div class="photo-dropzone" id="photoDropzone">
-                        <input type="file" id="photoInput" accept="image/*" multiple hidden>
-                        <i class="bi bi-cloud-upload d-block mb-1"></i>
-                        <p class="small text-muted mb-2">Перетащите или выберите файл</p>
-                        <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
-                        <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
+            <details class="scan-optional-details mb-3">
+                <summary>Комментарий и фото (опционально)</summary>
+                <div class="scan-optional-details-body">
+                    <div class="mb-3">
+                        <label class="form-label">Комментарий</label>
+                        <textarea class="form-control form-control-sm" id="commentInput" rows="2" placeholder="По необходимости"></textarea>
                     </div>
-                    <p class="form-text mt-1 mb-0" id="photoHint">Можно несколько фото</p>
+                    <div>
+                        <label class="form-label">Фото</label>
+                        <div class="photo-dropzone" id="photoDropzone">
+                            <input type="file" id="photoInput" accept="image/*" multiple hidden>
+                            <i class="bi bi-cloud-upload d-block mb-1"></i>
+                            <p class="small text-muted mb-2">Перетащите или выберите файл</p>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="photoSelectBtn">Выбрать</button>
+                            <img id="photoPreview" class="img-fluid rounded mt-2 d-none" alt="Превью">
+                        </div>
+                        <p class="form-text mt-1 mb-0" id="photoHint">Можно несколько фото</p>
+                    </div>
                 </div>
-                <div class="col-md-6 d-flex flex-column justify-content-end">
+            </details>
+
+            <div class="row g-3">
+                <div class="col-md-6 d-flex flex-column justify-content-end ms-auto">
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" id="quickScanMode">
                         <label class="form-check-label small" for="quickScanMode">Быстрый скан (авто-следующий МХ)</label>
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="oneHandModeToggle">
+                        <label class="form-check-label small" for="oneHandModeToggle">Режим одной руки (нижние большие кнопки)</label>
                     </div>
                     <button type="button" class="btn btn-primary" id="saveScanBtn">
                         <span class="spinner-border spinner-border-sm me-2 d-none" id="saveSpinner" role="status"></span>
@@ -282,6 +286,18 @@
             </div>
         </div>
     </section>
+
+    <div class="one-hand-dock full-mode-only d-none" id="oneHandDock" aria-label="Панель одной руки">
+        <div class="one-hand-dock__statuses">
+            <button type="button" class="one-hand-status-btn" data-onehand-status="ok">Совпадает</button>
+            <button type="button" class="one-hand-status-btn" data-onehand-status="error">Ошибка</button>
+            <button type="button" class="one-hand-status-btn" data-onehand-status="missing">Отсутствует</button>
+            <button type="button" class="one-hand-status-btn" data-onehand-status="shelf_error">Поломалось</button>
+        </div>
+        <button type="button" class="btn btn-primary one-hand-save-btn" id="oneHandSaveBtn">
+            <i class="bi bi-check2-circle me-1"></i>Сохранить
+        </button>
+    </div>
 
     {# ── История сканов ── #}
     <section class="card work-block full-mode-only card-history">
@@ -308,7 +324,7 @@
                     <tbody id="historyTableBody">
                         <tr class="history-empty-row">
                             <td colspan="5" class="p-0 border-0">
-                                <div class="history-empty-state" id="historyEmptyState">
+                                <div class="history-empty-state empty-state" id="historyEmptyState">
                                     <i class="bi bi-calendar3 history-empty-icon"></i>
                                     <p class="history-empty-title">Выберите период</p>
                                     <p class="history-empty-text">Укажите даты и нажмите «Показать»</p>
